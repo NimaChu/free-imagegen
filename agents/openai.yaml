@@ -1,0 +1,4 @@
+interface:
+  display_name: "Free ImageGen"
+  short_description: "Local free text-to-image via SVG to PNG"
+  default_prompt: "Use $free-imagegen to generate image assets locally by creating SVG first and then converting to PNG."
