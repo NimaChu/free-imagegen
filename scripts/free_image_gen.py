@@ -338,15 +338,21 @@ def _wrap_text(text: str, limit: int) -> list[str]:
     if not text:
         return []
     if re.search(r"[\u4e00-\u9fff]", text):
-        tokens = re.findall(r"[A-Za-z0-9\-\+\.]+|[\u4e00-\u9fff]|[^\s]", text)
+        tokens = re.findall(r"[A-Za-z0-9\-\+\.]+|\s+|[\u4e00-\u9fff]|[^\s]", text)
         lines: list[str] = []
         current = ""
         current_len = 0
         for token in tokens:
+            if token.isspace():
+                if current and not current.endswith(" "):
+                    if current_len + 1 <= limit:
+                        current += " "
+                        current_len += 1
+                continue
             token_len = max(1, len(token))
             if token_len > limit:
                 if current:
-                    lines.append(current)
+                    lines.append(current.strip())
                     current = ""
                     current_len = 0
                 for i in range(0, len(token), limit):
@@ -357,11 +363,11 @@ def _wrap_text(text: str, limit: int) -> list[str]:
                 current_len += token_len
             else:
                 if current:
-                    lines.append(current)
+                    lines.append(current.strip())
                 current = token
                 current_len = token_len
         if current:
-            lines.append(current)
+            lines.append(current.strip())
         return lines
     words = text.split()
     lines: list[str] = []
@@ -408,6 +414,53 @@ def _svg_text_block(
         )
     pieces.append("</g>")
     return "".join(pieces)
+
+
+def _text_block_height(lines: list[str], size: int, line_gap: float = 1.2) -> float:
+    if not lines:
+        return 0
+    return size * (1 + max(0, len(lines) - 1) * line_gap)
+
+
+def _fit_text_block(
+    text: str,
+    wrap_limits: list[int],
+    size_candidates: list[int],
+    max_lines: int,
+    prefer_single_mixed_short: bool = False,
+) -> tuple[list[str], int]:
+    if not text:
+        return [], size_candidates[-1] if size_candidates else 16
+    mixed = bool(re.search(r"[\u4e00-\u9fff]", text) and re.search(r"[A-Za-z]", text))
+    compact_text = re.sub(r"\s+", "", text)
+    if prefer_single_mixed_short and mixed and len(compact_text) <= 18:
+        return [text], size_candidates[-1] if size_candidates else 16
+    best_lines: list[str] | None = None
+    best_size = size_candidates[-1] if size_candidates else 16
+    for limit in wrap_limits:
+        lines = _wrap_text(text, limit)
+        for size in size_candidates:
+            if len(lines) <= max_lines:
+                return lines, size
+        if best_lines is None or len(lines) < len(best_lines):
+            best_lines = lines
+    return (best_lines or _wrap_text(text, wrap_limits[-1]), best_size)
+
+
+def _adaptive_stack_positions(start_y: float, heights: list[float], gaps: list[float]) -> list[float]:
+    positions = [start_y]
+    current = start_y
+    for idx, height in enumerate(heights[:-1]):
+        current += height + gaps[idx]
+        positions.append(current)
+    return positions
+
+
+def _tight_row_metrics(total_height: int, header_bottom: float, footer_reserved: float, rows: int) -> tuple[float, float]:
+    available = max(total_height * 0.32, total_height - header_bottom - footer_reserved)
+    gap = max(total_height * 0.014, min(total_height * 0.02, available * 0.04))
+    row_h = (available - gap * max(0, rows - 1)) / max(1, rows)
+    return row_h, gap
 
 
 def _derive_info_copy(prompt: str, mode: str = "infographic") -> dict[str, Any]:
@@ -459,6 +512,10 @@ def _extract_focus_token(text: str) -> str | None:
 
 def _infer_infographic_kind(prompt: str) -> str:
     lower = prompt.lower()
+    if any(token in lower for token in ["产品地图", "版图", "生态图", "landscape map", "map"]):
+        return "map"
+    if any(token in lower for token in ["厂家", "厂商", "工具速览", "产品速览", "目录", "速览"]):
+        return "catalog"
     if any(token in lower for token in ["问答", "qa", "q&a", "问题", "解答"]):
         return "qa"
     if any(token in lower for token in ["时间线", "timeline", "演进", "历程"]):
@@ -485,6 +542,21 @@ def _split_comparison_row(text: str) -> tuple[str, str, str]:
         left, right = rest.split("→", 1)
         return title.strip(), left.strip(), right.strip()
     return title.strip(), rest.strip(), ""
+
+
+def _split_catalog_row(text: str) -> tuple[str, str, str]:
+    compact = text.strip()
+    if "/" in compact:
+        parts = [part.strip() for part in compact.split("/") if part.strip()]
+        if len(parts) >= 3:
+            return parts[0], parts[1], " / ".join(parts[2:])
+        if len(parts) == 2:
+            return parts[0], parts[1], ""
+    if "：" in compact:
+        left, right = compact.split("：", 1)
+        return left.strip(), right.strip(), ""
+    title, desc = _split_bullet_copy(compact)
+    return title.strip(), desc.strip(), ""
 
 
 def _parse_article_sections(prompt: str) -> list[dict[str, Any]]:
@@ -895,25 +967,35 @@ def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
     else:
         variant = "quote" if focus_token else ("note" if seed % 2 else "quote")
 
-    title_lines = _wrap_text(copy["title"], 5 if is_tall and re.search(r"[\u4e00-\u9fff]", copy["title"]) else 7 if re.search(r"[\u4e00-\u9fff]", copy["title"]) else 16)
-    subtitle_lines = _wrap_text(copy["subtitle"], 14 if re.search(r"[\u4e00-\u9fff]", copy["subtitle"]) else 26)
-
     if variant == "quote":
         bg = "#F2ECFA"
         ink = "#3E384D"
         accent = "#FFBF47"
         soft = "#DBCDF4"
         quote_size = max(64, int(width * 0.11))
-        title_size = max(50, int(width * (0.09 if is_tall else 0.08)))
-        subtitle_size = max(20, int(width * 0.026))
+        title_lines, title_size = _fit_text_block(
+            copy["title"],
+            [12, 10, 8, 7] if re.search(r"[\u4e00-\u9fff]", copy["title"]) else [20, 18, 16],
+            [max(54, int(width * 0.094)), max(48, int(width * 0.082)), max(42, int(width * 0.072))],
+            3,
+            prefer_single_mixed_short=True,
+        )
+        subtitle_lines, subtitle_size = _fit_text_block(
+            copy["subtitle"],
+            [20, 16, 14] if re.search(r"[\u4e00-\u9fff]", copy["subtitle"]) else [30, 26, 22],
+            [max(22, int(width * 0.028)), max(20, int(width * 0.025)), max(18, int(width * 0.022))],
+            2,
+        )
         highlight_width = width * (0.30 if focus_token else 0.18)
+        title_y = height * (0.42 if is_tall else 0.46)
+        subtitle_y = min(height * 0.84, title_y + _text_block_height(title_lines, title_size, 1.08) + height * 0.10)
         return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <rect x="0" y="0" width="{width}" height="{height}" fill="{bg}"/>
   <text x="{width*0.12:.2f}" y="{height*0.18:.2f}" font-family="Georgia, Times New Roman, serif" font-size="{quote_size}" font-weight="900" fill="{soft}">“</text>
   <text x="{width*0.19:.2f}" y="{height*0.18:.2f}" font-family="Georgia, Times New Roman, serif" font-size="{quote_size}" font-weight="900" fill="{soft}">“</text>
   <rect x="{width*0.40:.2f}" y="{height*(0.43 if is_tall else 0.47):.2f}" width="{highlight_width:.2f}" height="{height*0.03:.2f}" fill="{accent}"/>
-  {_svg_text_block(width*0.12, height*(0.42 if is_tall else 0.46), title_lines, title_size, ink, weight=900, line_gap=1.08)}
-  {_svg_text_block(width*0.12, height*(0.80 if is_tall else 0.78), subtitle_lines[:2], subtitle_size, "#6C6680", weight=700, line_gap=1.18)}
+  {_svg_text_block(width*0.12, title_y, title_lines, title_size, ink, weight=900, line_gap=1.08)}
+  {_svg_text_block(width*0.12, subtitle_y, subtitle_lines[:2], subtitle_size, "#6C6680", weight=700, line_gap=1.18)}
   <rect x="{width*0.82:.2f}" y="{height*0.92:.2f}" width="{width*0.08:.2f}" height="{height*0.012:.2f}" fill="{soft}"/>
 </svg>'''
 
@@ -927,6 +1009,14 @@ def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
     paper_y = height * 0.08
     paper_w = width * 0.84
     paper_h = height * 0.84
+    title_lines, title_size = _fit_text_block(
+        copy["title"],
+        [12, 10, 8] if re.search(r"[\u4e00-\u9fff]", copy["title"]) else [18, 16, 14],
+        [max(48, int(width*(0.102 if is_tall else 0.092))), max(42, int(width*(0.09 if is_tall else 0.082))), max(36, int(width*0.074))],
+        4,
+        prefer_single_mixed_short=True,
+    )
+    title_y = height*(0.38 if is_tall else 0.44)
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <rect x="0" y="0" width="{width}" height="{height}" fill="{card_bg}"/>
   <rect x="{paper_x + width*0.03:.2f}" y="{paper_y - height*0.01:.2f}" width="{paper_w:.2f}" height="{paper_h:.2f}" rx="{width*0.05:.2f}" fill="{shadow}"/>
@@ -934,7 +1024,7 @@ def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
   {_svg_text_block(width*0.16, height*0.16, [emoji], max(34, int(width*0.07)), ink, weight=700)}
   {_svg_text_block(width*0.18, height*0.20, ["..."], max(18, int(width*0.03)), meta, weight=800)}
   {_svg_text_block(width*0.72, height*0.18, [copy["kicker"].title() if copy["kicker"] else "Text Note"], max(16, int(width*0.026)), meta, weight=800)}
-  {_svg_text_block(width*0.14, height*(0.42 if is_tall else 0.48), title_lines, max(42, int(width*(0.10 if is_tall else 0.088))), ink, weight=900, line_gap=1.12)}
+  {_svg_text_block(width*0.14, title_y, title_lines, title_size, ink, weight=900, line_gap=1.08)}
   <path d="M {width*0.14:.2f} {height*0.86:.2f} L {width*0.82:.2f} {height*0.86:.2f}" stroke="{meta}" stroke-width="{max(3, int(width*0.0025))}"/>
 </svg>'''
 
@@ -942,9 +1032,87 @@ def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
 def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
     copy = _derive_info_copy(prompt, mode="infographic")
     kind = _infer_infographic_kind(prompt)
-    title_lines = _wrap_text(copy["title"], 8 if re.search(r"[\u4e00-\u9fff]", copy["title"]) else 18)
-    subtitle_lines = _wrap_text(copy["subtitle"], 16 if re.search(r"[\u4e00-\u9fff]", copy["subtitle"]) else 28)
+    title_lines, title_size = _fit_text_block(
+        copy["title"],
+        [12, 10, 8] if re.search(r"[\u4e00-\u9fff]", copy["title"]) else [20, 18, 16],
+        [max(32, int(width*0.048)), max(28, int(width*0.042)), max(24, int(width*0.038))],
+        3,
+        prefer_single_mixed_short=True,
+    )
+    subtitle_lines, subtitle_size = _fit_text_block(
+        copy["subtitle"],
+        [18, 16, 14] if re.search(r"[\u4e00-\u9fff]", copy["subtitle"]) else [30, 26, 22],
+        [max(16, int(width*0.02)), max(15, int(width*0.019)), max(14, int(width*0.017))],
+        2,
+    )
     bullets = copy["bullets"][:]
+
+    if kind == "map":
+        zones = bullets[:3] or [
+            "编码代理：Claude Code、Codex、Gemini CLI，强调终端执行与代理能力",
+            "AI IDE：Cursor、Windsurf、GitHub Copilot，强调上下文与协作",
+            "云端开发与应用生成：Replit、Lovable、Bolt.new，强调原型与部署",
+        ]
+        zone_y = [height * 0.30, height * 0.50, height * 0.70]
+        zone_h = height * 0.14
+        colors = [("#EAF0FF", "#6B74D8"), ("#F8EEFF", "#C75BCE"), ("#ECFFF5", "#32A56A")]
+        blocks: list[str] = []
+        for idx, item in enumerate(zones):
+            heading, desc = _split_bullet_copy(item)
+            y = zone_y[idx]
+            bg_fill, accent = colors[idx % len(colors)]
+            blocks.append(f'<rect x="{width*0.08:.2f}" y="{y:.2f}" width="{width*0.84:.2f}" height="{zone_h:.2f}" rx="24" fill="{bg_fill}"/>')
+            blocks.append(f'<rect x="{width*0.10:.2f}" y="{y + zone_h*0.18:.2f}" width="{width*0.012:.2f}" height="{zone_h*0.62:.2f}" rx="8" fill="{accent}"/>')
+            blocks.append(_svg_text_block(width*0.15, y + zone_h*0.33, _wrap_text(heading, 12 if re.search(r"[\u4e00-\u9fff]", heading) else 18), max(20, int(width*0.026)), "#243047", weight=900, line_gap=1.05))
+            blocks.append(_svg_text_block(width*0.15, y + zone_h*0.63, _wrap_text(desc, 28 if re.search(r"[\u4e00-\u9fff]", desc) else 40), max(14, int(width*0.018)), "#667089", weight=700, line_gap=1.08))
+        return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+  <rect x="0" y="0" width="{width}" height="{height}" fill="#F5F6FC"/>
+  <rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.24:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="#EEF2FF"/>
+  {_svg_text_block(width*0.10, height*0.105, [copy["kicker"] or "产品地图"], max(14, int(width*0.017)), "#6B74D8", weight=800)}
+  {_svg_text_block(width*0.08, height*0.16, title_lines, title_size, "#243047", weight=900, line_gap=1.04)}
+  {_svg_text_block(width*0.08, height*0.22, subtitle_lines[:2], subtitle_size, "#7E869B", weight=700, line_gap=1.08)}
+  <rect x="{width*0.08:.2f}" y="{height*0.25:.2f}" width="{width*0.12:.2f}" height="{height*0.04:.2f}" rx="16" fill="#F2EEFF"/>
+  {_svg_text_block(width*0.11, height*0.276, [copy["emphasis"]], max(18, int(width*0.022)), "#7A59E6", weight=900)}
+  <g>{''.join(blocks)}</g>
+  {_svg_text_block(width*0.50, height*0.94, ["按产品形态看清当前 Vibe Coding 版图"], max(14, int(width*0.018)), "#A7ADBF", weight=600, anchor="middle")}
+</svg>'''
+
+    if kind == "catalog":
+        mixed_title = bool(re.search(r"[\u4e00-\u9fff]", copy["title"]) and re.search(r"[A-Za-z]", copy["title"]))
+        compact_title = re.sub(r"\s+", "", copy["title"])
+        if mixed_title and len(compact_title) <= 18:
+            catalog_title_lines = [copy["title"]]
+        else:
+            catalog_title_lines = _wrap_text(copy["title"], 10 if mixed_title else 6 if re.search(r"[\u4e00-\u9fff]", copy["title"]) else 14)
+        catalog_subtitle_lines = subtitle_lines[:2]
+        catalog_title_size = max(26, int(width*0.041)) if len(catalog_title_lines) == 1 else max(30, int(width*0.046))
+        catalog_title_y = height * 0.16
+        catalog_subtitle_y = catalog_title_y + len(catalog_title_lines) * catalog_title_size * 1.02 + height * 0.02
+        catalog_badge_y = catalog_subtitle_y + max(1, len(catalog_subtitle_lines)) * max(15, int(width*0.019)) * 1.08 + height * 0.025
+        rows = bullets[:6] or ["Cursor / AI IDE / Agent 与代码库上下文", "Windsurf / Agent IDE / 流程驱动与协作", "GitHub Copilot / 编程助手 / 生态广上手快"]
+        row_h, row_gap = _tight_row_metrics(height, catalog_badge_y + height * 0.042, height * 0.11, len(rows))
+        cards: list[str] = []
+        start_y = catalog_badge_y + height * 0.03
+        colors = ["#6F67DE", "#F06AB2", "#35C5F2", "#43E39B", "#FFB84D", "#8B4DB4"]
+        for idx, row in enumerate(rows):
+            y = start_y + idx * (row_h + row_gap)
+            name, role, desc = _split_catalog_row(row)
+            cards.append(f'<rect x="{width*0.07:.2f}" y="{y:.2f}" width="{width*0.86:.2f}" height="{row_h*0.74:.2f}" rx="18" fill="#FFFFFF"/>')
+            cards.append(f'<circle cx="{width*0.12:.2f}" cy="{y + row_h*0.25:.2f}" r="{width*0.022:.2f}" fill="{colors[idx % len(colors)]}"/>')
+            cards.append(_svg_text_block(width*0.17, y + row_h*0.23, [name], max(17, int(width*0.023)), "#2A2F45", weight=900))
+            cards.append(_svg_text_block(width*0.17, y + row_h*0.44, _wrap_text(role, 16 if re.search(r"[\u4e00-\u9fff]", role) else 22), max(13, int(width*0.017)), "#6A73D8", weight=800, line_gap=1.03))
+            cards.append(_svg_text_block(width*0.52, y + row_h*0.29, _wrap_text(desc, 20 if re.search(r"[\u4e00-\u9fff]", desc) else 28), max(13, int(width*0.017)), "#667089", weight=700, line_gap=1.05))
+        return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+  <rect x="0" y="0" width="{width}" height="{height}" fill="#F5F6FC"/>
+  <rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.26:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="#EEF2FF"/>
+  {_svg_text_block(width*0.10, height*0.105, [copy["kicker"] or "工具速览"], max(14, int(width*0.017)), "#6B74D8", weight=800)}
+  {_svg_text_block(width*0.07, catalog_title_y, catalog_title_lines, catalog_title_size, "#243047", weight=900, line_gap=1.02)}
+  {_svg_text_block(width*0.07, catalog_subtitle_y, catalog_subtitle_lines, max(15, int(width*0.019)), "#7E869B", weight=700, line_gap=1.08)}
+  <rect x="{width*0.07:.2f}" y="{catalog_badge_y:.2f}" width="{width*0.16:.2f}" height="{height*0.042:.2f}" rx="18" fill="#F2EEFF"/>
+  {_svg_text_block(width*0.10, catalog_badge_y + height*0.028, [copy["emphasis"]], max(18, int(width*0.022)), "#7A59E6", weight=900)}
+  <g>{''.join(cards)}</g>
+  {_svg_text_block(width*0.50, height*0.95, ["主流产品定位、特点和适用场景"], max(14, int(width*0.018)), "#A7ADBF", weight=600, anchor="middle")}
+</svg>'''
 
     if kind == "qa":
         qa_items = bullets[:4] or ["问题定义：先说结论，再拆原因", "核心机制：把复杂概念拆成 3 个点", "关键数据：用数字做视觉锚点", "落地建议：最后给出行动结论"]
