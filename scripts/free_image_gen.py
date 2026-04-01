@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import html
 import json
 import math
+import mimetypes
 import re
 import shutil
 import subprocess
@@ -57,6 +59,19 @@ def _clean_line(text: str) -> str:
     return text.strip(" -—•\t")
 
 
+def _strip_image_directives(text: str) -> str:
+    return re.sub(r"(?:^|\s)(?:插图文件|IMAGE_FILE)\s*[:：]\s*[^\n]+", "", text, flags=re.IGNORECASE).strip()
+
+
+def _extract_story_image_paths(text: str) -> list[str]:
+    paths: list[str] = []
+    for m in re.finditer(r"(?:^|\s)(?:插图文件|IMAGE_FILE)\s*[:：]\s*([^\n]+)", text, flags=re.IGNORECASE):
+        value = m.group(1).strip().strip('"')
+        if value:
+            paths.append(value)
+    return paths
+
+
 def _normalize_dedupe_text(text: str) -> str:
     return re.sub(r'[\"“”\s，。！？!：:；;\-—·]+', "", text)
 
@@ -65,6 +80,16 @@ def _is_section_heading(line: str) -> bool:
     if not line:
         return False
     if len(line) <= 28 and any(token in line for token in ["为什么", "写在最后", "联系我们", "官方公告", "震撼数据", "硬伤", "更配", "配置", "步骤"]):
+        return True
+    if len(line) <= 32 and re.search(r"[？!?！]$", line):
+        return True
+    if (
+        len(line) <= 26
+        and not re.search(r"[。；;，,]", line)
+        and any(token in line for token in ["第", "场景", "能力", "使用", "龙虾", "智能体", "部署", "召唤", "详解", "指南", "选项", "课"])
+    ):
+        return True
+    if len(line) <= 22 and re.match(r"^[^：:，,。；;]{1,10}[：:][^，,。；;]{0,12}$", line):
         return True
     if re.match(r'^[0-9一二三四五六七八九十]+[、\.]', line):
         return True
@@ -112,7 +137,33 @@ def _pick_stat_phrase(prompt: str) -> str | None:
     return max(matches, key=score)
 
 
+def _article_line_score(text: str) -> int:
+    score = 0
+    if len(text) < 8 or len(text) > 52:
+        return -99
+    if any(token in text for token in ["家人们", "炸了", "out"]):
+        score -= 8
+    if any(token in text for token in ["值得升", "结论", "意味着", "一句话概括", "最重要", "最值得关注"]):
+        score += 8
+    if any(token in text for token in ["建议", "一定", "先", "再", "不要", "记住一句话", "提醒", "避坑"]):
+        score += 7
+    if any(token in text for token in ["风险", "卡死", "失败", "异常", "告警", "拦下来", "配置非法"]):
+        score += 7
+    if any(token in text for token in ["正式定名", "优先推荐", "官方", "发布试用", "明确使用", "中文名"]):
+        score += 7
+    if any(token in text for token in ["调用量", "增长", "关键指标", "突破", "万亿", "倍", "%"]):
+        score += 6
+    if any(token in text for token in ["既体现", "强调", "扩展", "原因", "本质", "语义", "多模态", "遵循"]):
+        score += 5
+    if any(token in text for token in ["词元", "Token", "Prompt", "OpenClaw", "MCP", "Feishu", "Lark"]):
+        score += 3
+    if "2026 年 3 月" in text or "3 月 25 日" in text:
+        score += 1
+    return score
+
+
 def _derive_article_copy(prompt: str, mode: str = "infographic") -> dict[str, Any]:
+    prompt = _strip_image_directives(prompt)
     lines = _meaningful_lines(prompt)
     title = lines[0] if lines else "文章重点提炼"
     subtitle = ""
@@ -139,24 +190,6 @@ def _derive_article_copy(prompt: str, mode: str = "infographic") -> dict[str, An
     candidate_lines.extend(lines[1:])
     candidate_lines.extend(re.split(r"[。！？!\n]", prompt))
 
-    def score_line(text: str) -> int:
-        score = 0
-        if len(text) < 8 or len(text) > 44:
-            return -99
-        if any(token in text for token in ["家人们", "炸了", "out"]):
-            score -= 8
-        if any(token in text for token in ["正式定名", "优先推荐", "官方", "发布试用", "明确使用", "中文名"]):
-            score += 7
-        if any(token in text for token in ["调用量", "增长", "关键指标", "突破", "万亿", "倍", "%"]):
-            score += 6
-        if any(token in text for token in ["既体现", "强调", "扩展", "原因", "本质", "语义", "多模态", "遵循"]):
-            score += 5
-        if any(token in text for token in ["词元", "Token", "Prompt"]):
-            score += 3
-        if "2026 年 3 月" in text or "3 月 25 日" in text:
-            score += 1
-        return score
-
     ranked: list[tuple[int, str]] = []
     seen: set[str] = set()
     for raw in candidate_lines:
@@ -165,7 +198,7 @@ def _derive_article_copy(prompt: str, mode: str = "infographic") -> dict[str, An
         if not clean or dedupe_key in seen:
             continue
         seen.add(dedupe_key)
-        ranked.append((score_line(clean), clean))
+        ranked.append((_article_line_score(clean), clean))
 
     ranked.sort(key=lambda item: item[0], reverse=True)
     official = [text for score, text in ranked if score > 0 and any(token in text for token in ["正式定名", "优先推荐", "官方", "明确使用", "中文名"])]
@@ -193,12 +226,14 @@ def _derive_article_copy(prompt: str, mode: str = "infographic") -> dict[str, An
         ]
 
     kicker = "文章图解" if mode == "infographic" else "ARTICLE"
-    emphasis = _pick_stat_phrase(prompt) or "3"
+    emphasis = _pick_stat_phrase(prompt) or ""
+    footer = _extract_labeled_value(prompt, ["页脚", "底部文案", "footer"]) or ""
     return {
         "title": title,
         "subtitle": subtitle,
         "kicker": kicker,
         "emphasis": emphasis,
+        "footer": footer,
         "bullets": bullets[:6],
     }
 
@@ -304,6 +339,119 @@ def _extract_labeled_value(prompt: str, labels: list[str]) -> str | None:
         if value:
             return value
     return None
+
+
+def _strip_control_directives(text: str) -> str:
+    patterns = [
+        r"(?:^|\s)(?:主题|theme)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:页面密度|密度|density)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:系列风格|统一程度|series-style|series_style)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:页面角色|章节角色|section-role|section_role)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:页面风格|风格|surface-style|style)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:强调色|accent)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
+    ]
+    out = text
+    for pattern in patterns:
+        out = re.sub(pattern, "", out, flags=re.IGNORECASE)
+    return re.sub(r"\s{2,}", " ", out).strip()
+
+
+def _resolve_render_controls(prompt: str) -> dict[str, str]:
+    prompt_lower = prompt.lower()
+    def direct_value(labels: list[str]) -> str:
+        for label in labels:
+            m = re.search(
+                rf"(?:^|[\s，,；;\n]){re.escape(label)}\s*[:：]\s*([A-Za-z\u4e00-\u9fff\-]+)",
+                prompt,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                return m.group(1).strip().lower()
+        return ""
+
+    theme_raw = direct_value(["主题", "theme"])
+    density_raw = direct_value(["页面密度", "密度", "density"])
+    series_style_raw = direct_value(["系列风格", "统一程度", "series-style", "series_style"])
+    section_role_raw = direct_value(["页面角色", "章节角色", "section-role", "section_role"])
+    style_raw = direct_value(["页面风格", "风格", "surface-style", "style"])
+    accent_raw = direct_value(["强调色", "accent"])
+
+    def normalize_theme(value: str) -> str:
+        if value in {"dark", "深色", "夜间", "暗色"}:
+            return "dark"
+        if value in {"light", "浅色", "明亮", "亮色"}:
+            return "light"
+        return "auto"
+
+    def normalize_density(value: str) -> str:
+        if value in {"compact", "紧凑", "dense"}:
+            return "compact"
+        if value in {"comfy", "舒展", "宽松", "comfortable"}:
+            return "comfy"
+        return "auto"
+
+    def normalize_style(value: str) -> str:
+        if value in {"card", "卡片", "cards"}:
+            return "card"
+        if value in {"minimal", "极简"}:
+            return "minimal"
+        if value in {"editorial", "杂志", "article"}:
+            return "editorial"
+        if value in {"soft", "柔和"}:
+            return "soft"
+        return "auto"
+
+    def normalize_series_style(value: str) -> str:
+        if value in {"loose", "自由", "松散"}:
+            return "loose"
+        if value in {"unified", "统一", "系列化", "统一风格"}:
+            return "unified"
+        return "auto"
+
+    def normalize_section_role(value: str) -> str:
+        if value in {"cover", "封面"}:
+            return "cover"
+        if value in {"chapter", "章节"}:
+            return "chapter"
+        if value in {"body", "正文"}:
+            return "body"
+        if value in {"summary", "总结", "结尾"}:
+            return "summary"
+        return "auto"
+
+    def normalize_accent(value: str) -> str:
+        if value in {"blue", "蓝", "蓝色"}:
+            return "blue"
+        if value in {"green", "绿", "绿色"}:
+            return "green"
+        if value in {"warm", "orange", "橙", "暖色"}:
+            return "warm"
+        if value in {"rose", "pink", "粉", "粉色"}:
+            return "rose"
+        return "auto"
+
+    theme = normalize_theme(theme_raw)
+    density = normalize_density(density_raw)
+    series_style = normalize_series_style(series_style_raw)
+    section_role = normalize_section_role(section_role_raw)
+    style = normalize_style(style_raw)
+    accent = normalize_accent(accent_raw)
+
+    if theme == "auto" and any(token in prompt_lower for token in ["深色", "夜间", "暗色", "dark mode"]):
+        theme = "dark"
+    if style == "auto" and any(token in prompt_lower for token in ["极简", "minimal"]):
+        style = "minimal"
+    if accent == "auto" and any(token in prompt_lower for token in ["绿色", "green"]):
+        accent = "green"
+
+    return {
+        "theme": theme,
+        "density": density,
+        "series_style": series_style,
+        "section_role": section_role,
+        "style": style,
+        "accent": accent,
+    }
 
 
 def _parse_bullets(prompt: str) -> list[str]:
@@ -460,6 +608,8 @@ def _fit_text_block(
     best_size = size_candidates[-1] if size_candidates else 16
     fallback_score: tuple[int, float] | None = None
     for size in size_candidates:
+        if max_width_px is None or _estimate_line_width(text, size) <= max_width_px:
+            return [text], size
         for limit in wrap_limits:
             lines = _wrap_text(text, limit)
             width_ok = max_width_px is None or all(_estimate_line_width(line, size) <= max_width_px for line in lines)
@@ -491,6 +641,43 @@ def _fit_body_block(
     )
 
 
+def _article_body_wrap_profile(text: str) -> tuple[list[int], list[int], list[int], float]:
+    length = len(re.sub(r"\s+", "", text))
+    if re.search(r"https?://|`[^`]+`|[A-Za-z0-9_]+\.[A-Za-z0-9_]+", text):
+        return [30, 28, 26], [46, 40, 34], [17, 16, 15], 0.88
+    if length <= 28:
+        return [30, 28, 26], [42, 38, 34], [25, 23, 21], 1.00
+    if length <= 42:
+        return [28, 26, 24], [40, 36, 32], [24, 22, 20], 0.98
+    if length <= 64:
+        return [26, 24, 22], [38, 34, 30], [23, 21, 19], 0.95
+    return [24, 22, 20], [36, 32, 28], [22, 20, 18], 0.92
+
+
+def _article_paragraph_rhythm(text: str, height: int, code_like: bool = False) -> tuple[float, float]:
+    if code_like:
+        return 1.12, height * 0.022
+    length = len(re.sub(r"\s+", "", text))
+    if length <= 28:
+        return 1.56, height * 0.032
+    if length <= 42:
+        return 1.50, height * 0.029
+    if length <= 64:
+        return 1.44, height * 0.025
+    return 1.38, height * 0.021
+
+
+def _image_data_uri(path_text: str) -> str | None:
+    path = Path(path_text).expanduser()
+    if not path.exists() or not path.is_file():
+        return None
+    mime, _ = mimetypes.guess_type(str(path))
+    if not mime:
+        mime = "image/png"
+    data = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{data}"
+
+
 def _adaptive_stack_positions(start_y: float, heights: list[float], gaps: list[float]) -> list[float]:
     positions = [start_y]
     current = start_y
@@ -507,14 +694,42 @@ def _tight_row_metrics(total_height: int, header_bottom: float, footer_reserved:
     return row_h, gap
 
 
+def _normalize_layout_label(text: str) -> str:
+    return re.sub(r"[\s\-_/：:（）()【】\[\]·•]+", "", text or "").lower()
+
+
+def _visible_kicker(copy: dict[str, Any], fallback: str = "") -> str:
+    kicker = (copy.get("kicker") or "").strip()
+    title = (copy.get("title") or "").strip()
+    if not kicker:
+        return fallback
+    if title and _normalize_layout_label(kicker) == _normalize_layout_label(title):
+        return ""
+    if title and _normalize_layout_label(kicker) in _normalize_layout_label(title):
+        return ""
+    return kicker
+
+
+def _footer_lines(copy: dict[str, Any]) -> list[str]:
+    footer = (copy.get("footer") or "").strip()
+    return [footer] if footer else []
+
+
 def _derive_info_copy(prompt: str, mode: str = "infographic") -> dict[str, Any]:
-    if _looks_like_article_prompt(prompt):
-        return _derive_article_copy(prompt, mode=mode)
+    prompt = _strip_control_directives(_strip_image_directives(prompt))
     title = _extract_labeled_value(prompt, ["标题", "主标题", "title"]) or "信息图概览"
     subtitle = _extract_labeled_value(prompt, ["副标题", "subtitle"]) or "清晰层级 / 重点突出 / 本地生成"
     kicker = _extract_labeled_value(prompt, ["角标", "badge"]) or ("TEXT COVER" if mode == "text_cover" else "INFOGRAPHIC")
     emphasis = _extract_labeled_value(prompt, ["核心数字", "重点数字", "highlight"]) or ""
+    footer = _extract_labeled_value(prompt, ["页脚", "底部文案", "footer"]) or ""
     bullets = _parse_bullets(prompt)
+    has_explicit_structure = bool(
+        _extract_labeled_value(prompt, ["标题", "主标题", "title"])
+        or _extract_labeled_value(prompt, ["副标题", "subtitle"])
+        or bullets
+    )
+    if _looks_like_article_prompt(prompt) and not has_explicit_structure:
+        return _derive_article_copy(prompt, mode=mode)
     if not bullets:
         bullets = ["信息层级清晰", "重点数字突出", "适合封面与知识卡片", "本地 SVG 到 PNG 导出"]
     return {
@@ -522,11 +737,14 @@ def _derive_info_copy(prompt: str, mode: str = "infographic") -> dict[str, Any]:
         "subtitle": subtitle,
         "kicker": kicker,
         "emphasis": emphasis,
+        "footer": footer,
         "bullets": bullets[:6],
     }
 
 
 def _split_bullet_copy(text: str) -> tuple[str, str]:
+    if "`" in text or re.search(r"[A-Za-z0-9_]+\.[A-Za-z0-9_]+", text):
+        return text.strip(), "提炼重点信息，保持清晰易读。"
     if "：" in text:
         left, right = text.split("：", 1)
         return left.strip(), right.strip()
@@ -534,7 +752,9 @@ def _split_bullet_copy(text: str) -> tuple[str, str]:
         left, right = text.split(":", 1)
         return left.strip(), right.strip()
     compact = text.strip()
-    if re.search(r"[\u4e00-\u9fff]", compact):
+    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", compact))
+    has_latin = bool(re.search(r"[A-Za-z]", compact))
+    if has_cjk and not has_latin and "/" not in compact and "-" not in compact:
         if len(compact) > 8:
             return compact[:6], compact[6:]
     else:
@@ -542,6 +762,13 @@ def _split_bullet_copy(text: str) -> tuple[str, str]:
         if len(words) > 3:
             return " ".join(words[:3]), " ".join(words[3:])
     return compact, "提炼重点信息，保持清晰易读。"
+
+
+def _compact_excerpt(text: str, max_chars: int = 24) -> str:
+    compact = re.sub(r"\s+", "", text).strip("，。；;：:")
+    if len(compact) <= max_chars:
+        return compact
+    return compact[:max_chars].rstrip("，。；;：:") + "…"
 
 
 def _split_qa_item(text: str) -> tuple[str, str]:
@@ -567,6 +794,14 @@ def _extract_focus_token(text: str) -> str | None:
 
 def _infer_infographic_kind(prompt: str) -> str:
     lower = prompt.lower()
+    if any(token in lower for token in ["文章页", "article page", "正文页", "长文页"]):
+        return "article_page"
+    if any(token in lower for token in ["说明卡", "article note", "config note", "配置说明"]):
+        return "article_note"
+    if any(token in lower for token in ["文章卡", "article card", "文章排版", "长文卡片"]):
+        return "article"
+    if any(token in lower for token in ["清单", "checklist", "避坑", "注意事项", "升级前", "升级后", "建议"]):
+        return "checklist"
     if any(token in lower for token in ["产品地图", "版图", "生态图", "landscape map", "map"]):
         return "map"
     if any(token in lower for token in ["厂家", "厂商", "工具速览", "产品速览", "目录", "速览"]):
@@ -647,6 +882,56 @@ def _parse_article_sections(prompt: str) -> list[dict[str, Any]]:
     return sections
 
 
+def _is_dense_paragraph(lines: list[str]) -> bool:
+    if not lines:
+        return False
+    joined = " ".join(lines)
+    avg_len = sum(len(line) for line in lines) / max(1, len(lines))
+    punctuation = len(re.findall(r"[，。；：,:!?！？]", joined))
+    has_codeish = bool(re.search(r"`[^`]+`|[A-Za-z0-9_]+\.[A-Za-z0-9_]+", joined))
+    return avg_len >= 18 or punctuation >= 6 or has_codeish
+
+
+def _looks_like_config_note(lines: list[str]) -> bool:
+    if not lines:
+        return False
+    joined = " ".join(lines)
+    code_hits = len(re.findall(r"`[^`]+`|[A-Za-z0-9_]+\.[A-Za-z0-9_]+", joined))
+    config_words = len(re.findall(r"schema|doctor|health|gateway|plugins|plugin|feishu|lark|config|配置|字段|命令|插件", joined, flags=re.IGNORECASE))
+    return code_hits >= 1 or config_words >= 3
+
+
+def _merge_story_sections(sections: list[dict[str, Any]], max_sections: int = 5) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    idx = 0
+    while idx < len(sections):
+        section = sections[idx]
+        heading = section["heading"]
+        lines = list(section["lines"])
+        if (
+            idx + 1 < len(sections)
+            and len(merged) + (len(sections) - idx) > max_sections
+            and any(token in heading for token in ["坑", "问题", "建议", "配置", "插件", "Feishu", "Lark"])
+        ):
+            nxt = sections[idx + 1]
+            if any(token in nxt["heading"] for token in ["坑", "问题", "建议", "配置", "插件", "Feishu", "Lark", "不要", "最后", "其实"]):
+                heading = f"{heading} / {nxt['heading']}"
+                lines.extend(nxt["lines"])
+                idx += 1
+        merged.append({"heading": heading, "lines": lines})
+        idx += 1
+    return merged
+
+
+def _pick_card_heading_parts(heading: str) -> tuple[str, str]:
+    parts = [part.strip() for part in heading.split("/") if part.strip()]
+    if not parts:
+        return heading.strip(), ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], parts[1]
+
+
 def _story_card_prompt(title: str, subtitle: str, emphasis: str, bullets: list[str], heading: str) -> str:
     lower = heading.lower()
     if any(token in lower for token in ["为什么", "硬伤", "更配", "问题", "问答"]):
@@ -697,6 +982,12 @@ def _story_card_prompt(title: str, subtitle: str, emphasis: str, bullets: list[s
 def _infer_section_kind(heading: str, body_lines: list[str]) -> str:
     heading_lower = heading.lower()
     joined = " ".join(body_lines).lower()
+    if _looks_like_config_note(body_lines) or any(token in heading_lower for token in ["字段", "schema", "配置", "插件"]):
+        return "article_page"
+    if any(token in heading_lower for token in ["避坑", "建议", "提醒", "注意", "顺序"]) or any(token in joined for token in ["先", "再", "最后", "一定", "不要", "建议"]):
+        return "article_page"
+    if _is_dense_paragraph(body_lines):
+        return "article_page"
     if any(token in heading_lower for token in ["步骤", "流程", "配置"]) or any(token in joined for token in ["step", "步骤", "流程", "然后", "接着"]):
         return "flow"
     if any(token in heading_lower for token in ["对比", "前后", "vs"]) or any(token in joined for token in ["以前", "现在", "前后", "vs", "before", "after"]):
@@ -711,6 +1002,26 @@ def _infer_section_kind(heading: str, body_lines: list[str]) -> str:
 
 
 def _story_card_prompt_for_kind(title: str, subtitle: str, emphasis: str, bullets: list[str], heading: str, kind: str) -> str:
+    if kind == "article_page":
+        parts = ["信息图 文章页", f"角标：{heading}", f"标题：{title}", f"副标题：{subtitle}"]
+        for idx, item in enumerate(bullets[:6], start=1):
+            parts.append(f"{idx}. {item}")
+        return " ".join(parts)
+    if kind == "article_note":
+        parts = ["信息图 说明卡", f"角标：{heading}", f"标题：{title}", f"副标题：{subtitle}"]
+        for idx, item in enumerate(bullets[:5], start=1):
+            parts.append(f"{idx}. {item}")
+        return " ".join(parts)
+    if kind == "article":
+        parts = ["信息图 文章卡", f"角标：{heading}", f"标题：{title}", f"副标题：{subtitle}"]
+        for idx, item in enumerate(bullets[:5], start=1):
+            parts.append(f"{idx}. {item}")
+        return " ".join(parts)
+    if kind == "checklist":
+        parts = ["信息图 清单卡", f"角标：{heading}", f"标题：{title}", f"副标题：{subtitle}"]
+        for idx, item in enumerate(bullets[:5], start=1):
+            parts.append(f"{idx}. {item}")
+        return " ".join(parts)
     if kind == "qa":
         parts = ["信息图 问答卡", f"角标：{heading}", f"标题：{title}", f"副标题：{subtitle}", f"核心数字：{emphasis}"]
         for idx, item in enumerate(bullets[:4], start=1):
@@ -724,6 +1035,21 @@ def _story_card_prompt_for_kind(title: str, subtitle: str, emphasis: str, bullet
     if kind == "comparison":
         parts = ["信息图 对比图", f"角标：{heading}", f"标题：{title}", f"副标题：{subtitle}"]
         for idx, item in enumerate(bullets[:5], start=1):
+            parts.append(f"{idx}. {item}")
+        return " ".join(parts)
+    if kind == "catalog":
+        parts = ["信息图 工具速览", f"角标：{heading}", f"标题：{title}", f"副标题：{subtitle}", f"核心数字：{emphasis}"]
+        for idx, item in enumerate(bullets[:6], start=1):
+            parts.append(f"{idx}. {item}")
+        return " ".join(parts)
+    if kind == "map":
+        parts = ["信息图 产品地图", f"角标：{heading}", f"标题：{title}", f"副标题：{subtitle}", f"核心数字：{emphasis}"]
+        for idx, item in enumerate(bullets[:3], start=1):
+            parts.append(f"{idx}. {item}")
+        return " ".join(parts)
+    if kind == "mechanism":
+        parts = ["信息图 机制卡", f"角标：{heading}", f"标题：{title}", f"副标题：{subtitle}", f"核心数字：{emphasis}"]
+        for idx, item in enumerate(bullets[:4], start=1):
             parts.append(f"{idx}. {item}")
         return " ".join(parts)
     if kind == "flow":
@@ -789,6 +1115,195 @@ def _render_prompt_file(title: str, subtitle: str, heading: str, kind: str, prom
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _story_plan_analysis(plan: dict[str, Any]) -> dict[str, Any]:
+    cards = plan.get("cards", []) or []
+    return {
+        "title": plan.get("title", "文章图文卡组"),
+        "subtitle": plan.get("subtitle", ""),
+        "strategy": plan.get("strategy", "agent"),
+        "recommended_card_count": len(cards),
+        "section_count": len(cards),
+        "key_numbers": plan.get("key_numbers", []) or [],
+        "top_bullets": plan.get("top_bullets", []) or [],
+        "sections": [
+            {
+                "heading": card.get("heading", card.get("title", f"第{i + 1}页")),
+                "kind": card.get("kind", "article_page"),
+                "line_count": len(card.get("bullets", []) or []),
+                "points": (card.get("bullets", []) or [])[:4],
+            }
+            for i, card in enumerate(cards)
+        ],
+        "source_line_count": 0,
+        "source": "agent-plan",
+    }
+
+
+def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    analysis = _story_plan_analysis(plan)
+    global_title = analysis["title"]
+    global_subtitle = analysis["subtitle"] or "按 agent 规划渲染"
+    global_theme = plan.get("theme", "auto")
+    global_density = plan.get("density", "auto")
+    global_series_style = plan.get("series_style", "auto")
+    global_section_role = plan.get("section_role", "auto")
+    global_surface_style = plan.get("surface_style", plan.get("style", "auto"))
+    global_accent = plan.get("accent", "auto")
+    cards: list[dict[str, Any]] = []
+    raw_cards = plan.get("cards", []) or []
+    card_index = 1
+
+    if not raw_cards or raw_cards[0].get("kind") != "text_cover":
+        cover_prompt = f"文字封面 标题：{global_title} 副标题：{global_subtitle} 核心数字："
+        cards.append(
+            {
+                "index": card_index,
+                "heading": "cover",
+                "kind": "text_cover",
+                "title": global_title,
+                "subtitle": global_subtitle,
+                "emphasis": "",
+                "bullets": [],
+                "stem": "01-cover",
+                "prompt": cover_prompt,
+            }
+        )
+        card_index += 1
+
+    for raw in raw_cards:
+        kind = raw.get("kind", "article_page")
+        title = raw.get("title") or raw.get("heading") or f"第{card_index}页"
+        subtitle = raw.get("subtitle", "")
+        heading = raw.get("heading", title)
+        bullets = [str(item).strip() for item in (raw.get("bullets", []) or []) if str(item).strip()]
+        emphasis = raw.get("emphasis", "")
+        prompt = _story_card_prompt_for_kind(title, subtitle, emphasis, bullets, heading, kind)
+        prompt = _append_render_controls(
+            prompt,
+            raw.get("theme", global_theme),
+            raw.get("density", global_density),
+            raw.get("surface_style", raw.get("style", global_surface_style)),
+            raw.get("accent", global_accent),
+            raw.get("series_style", global_series_style),
+            raw.get("section_role", global_section_role),
+        )
+        if raw.get("image_path"):
+            prompt = f"{prompt}\n插图文件：{raw['image_path']}"
+        stem = f"{card_index:02d}-{_slugify(heading)[:24]}"
+        cards.append(
+            {
+                "index": card_index,
+                "heading": heading,
+                "kind": kind,
+                "title": title,
+                "subtitle": subtitle,
+                "emphasis": emphasis,
+                "bullets": bullets[:6],
+                "stem": stem,
+                "prompt": prompt,
+                "style": raw.get("style", ""),
+                "series_style": raw.get("series_style", global_series_style),
+                "section_role": raw.get("section_role", global_section_role),
+                "image_path": raw.get("image_path"),
+            }
+        )
+        card_index += 1
+        if card_index > 20:
+            break
+
+    return analysis, cards
+
+
+def _estimate_article_point_weight(text: str) -> float:
+    clean = re.sub(r"\s+", "", text)
+    base = max(1.0, len(clean) / 22.0)
+    if re.search(r"https?://|`[^`]+`|[A-Za-z0-9_]+\.[A-Za-z0-9_]+", text):
+        base += 0.8
+    if len(clean) <= 28:
+        base -= 0.2
+    return max(0.8, base)
+
+
+def _paginate_article_points(points: list[str], max_weight: float = 8.8, max_points: int = 4) -> list[list[str]]:
+    pages: list[list[str]] = []
+    current: list[str] = []
+    current_weight = 0.0
+    for point in points:
+        weight = _estimate_article_point_weight(point)
+        if current and (current_weight + weight > max_weight or len(current) >= max_points):
+            pages.append(current)
+            current = [point]
+            current_weight = weight
+        else:
+            current.append(point)
+            current_weight += weight
+    if current:
+        pages.append(current)
+    return pages or [points[:max_points]]
+
+
+def _looks_like_feature_card_line(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    return bool(
+        "——" in text
+        or any(token in text for token in ["执行能力", "拥有记忆", "持续进化", "24小时", "7x24", "7 x 24"])
+        or compact.startswith("「")
+    )
+
+
+def _plan_section_cards(heading: str, title: str, subtitle: str, section_kind: str, body_lines: list[str]) -> list[dict[str, Any]]:
+    if (
+        section_kind == "article_page"
+        and ("什么是" in heading or "是什么" in heading)
+        and len(body_lines) >= 3
+    ):
+        intro_lines = body_lines[:1]
+        feature_lines = [line for line in body_lines[1:] if _looks_like_feature_card_line(line)]
+        trailing_lines = [line for line in body_lines[1:] if line not in feature_lines]
+        planned: list[dict[str, Any]] = []
+        if intro_lines:
+            planned.append(
+                {
+                    "title": title,
+                    "subtitle": subtitle,
+                    "kind": "article_page",
+                    "bullets": intro_lines + trailing_lines[:1],
+                }
+            )
+        if feature_lines:
+            planned.append(
+                {
+                    "title": "OpenClaw 的 4 个核心特点",
+                    "subtitle": "与传统 AI 工具不同，它更像能持续干活的智能体",
+                    "kind": "mechanism",
+                    "bullets": feature_lines[:4],
+                }
+            )
+        if planned:
+            return planned
+
+    if section_kind == "article_page":
+        pages = _paginate_article_points(body_lines[:8], max_weight=8.8, max_points=4)
+        return [
+            {
+                "title": title if len(pages) == 1 else f"{title}（{idx + 1}）",
+                "subtitle": subtitle if idx == 0 else f"{_compact_excerpt(page[0], max_chars=20)} · 续页",
+                "kind": section_kind,
+                "bullets": page[:6],
+            }
+            for idx, page in enumerate(pages)
+        ]
+
+    return [
+        {
+            "title": title,
+            "subtitle": subtitle,
+            "kind": section_kind,
+            "bullets": body_lines[:6],
+        }
+    ]
+
+
 def _recommend_story_strategy(prompt: str, sections: list[dict[str, Any]]) -> str:
     lower = prompt.lower()
     if any(token in lower for token in ["教程", "步骤", "配置", "怎么做", "workflow", "guide"]):
@@ -804,7 +1319,7 @@ def _recommend_story_strategy(prompt: str, sections: list[dict[str, Any]]) -> st
 
 def _analyze_article(prompt: str, strategy: str = "auto") -> dict[str, Any]:
     article = _derive_article_copy(prompt, mode="infographic")
-    sections = _parse_article_sections(prompt)
+    sections = _merge_story_sections(_parse_article_sections(prompt))
     lines = _meaningful_lines(prompt)
     resolved_strategy = _recommend_story_strategy(prompt, sections) if strategy == "auto" else strategy
     key_numbers = _dedupe_numbers(re.findall(r"\d+(?:\.\d+)?\s*(?:万亿|亿|万|多倍|倍|%|年|月|日)", prompt))
@@ -837,7 +1352,7 @@ def _analyze_article(prompt: str, strategy: str = "auto") -> dict[str, Any]:
 
 def _build_story_cards(prompt: str, strategy: str = "auto") -> tuple[dict[str, Any], list[dict[str, Any]]]:
     article = _derive_article_copy(prompt, mode="infographic")
-    sections = _parse_article_sections(prompt)
+    sections = _merge_story_sections(_parse_article_sections(prompt))
     analysis = _analyze_article(prompt, strategy=strategy)
     resolved_strategy = analysis["strategy"]
     cards: list[dict[str, Any]] = []
@@ -866,39 +1381,61 @@ def _build_story_cards(prompt: str, strategy: str = "auto") -> tuple[dict[str, A
         heading = section["heading"]
         if heading == "导语":
             continue
-        body_lines = [line for line in section["lines"] if len(line) >= 6][:6]
+        body_lines = [line for line in section["lines"] if len(line) >= 6][:8]
         if not body_lines:
             continue
-        title = heading
-        subtitle = body_lines[0][:28]
+        heading_title, heading_sub = _pick_card_heading_parts(heading)
+        title = heading_title
+        subtitle = heading_sub or _compact_excerpt(body_lines[0], max_chars=24)
         emphasis = _pick_stat_phrase("\n".join([heading, *body_lines])) or article["emphasis"]
         section_kind = _infer_section_kind(heading, body_lines)
-        card_prompt = _story_card_prompt_for_kind(title, subtitle, emphasis, body_lines, heading, section_kind)
-        if resolved_strategy == "story" and card_index == 2:
-            card_prompt = f"文字封面 标题：{title} 副标题：{subtitle} 核心数字：{emphasis}"
-            section_kind = "text_cover"
-        elif resolved_strategy == "visual" and any(token in heading for token in ["公告", "数据"]):
-            card_prompt = f"文字封面 标题：{title} 副标题：{subtitle} 核心数字：{emphasis}"
-            section_kind = "text_cover"
-        stem = f"{card_index:02d}-{_slugify(heading)[:24]}"
-        cards.append(
-            {
-                "index": card_index,
-                "heading": heading,
-                "kind": section_kind,
-                "title": title,
-                "subtitle": subtitle,
-                "emphasis": emphasis,
-                "bullets": body_lines[:5],
-                "stem": stem,
-                "prompt": card_prompt,
-            }
-        )
-        card_index += 1
-        if card_index > 6:
+        planned_cards = _plan_section_cards(heading, title, subtitle, section_kind, body_lines)
+
+        for page_idx, planned in enumerate(planned_cards, start=1):
+            page_title = planned["title"]
+            page_subtitle = planned["subtitle"]
+            page_kind = planned["kind"]
+            page_points = planned["bullets"]
+            card_prompt = _story_card_prompt_for_kind(page_title, page_subtitle, emphasis, page_points, heading, page_kind)
+            if resolved_strategy == "story" and card_index == 2:
+                card_prompt = f"文字封面 标题：{page_title} 副标题：{page_subtitle} 核心数字：{emphasis}"
+                page_kind = "text_cover"
+            elif resolved_strategy == "visual" and any(token in heading for token in ["公告", "数据"]):
+                card_prompt = f"文字封面 标题：{page_title} 副标题：{page_subtitle} 核心数字：{emphasis}"
+                page_kind = "text_cover"
+            stem_heading = heading if len(planned_cards) == 1 else f"{heading}-{page_idx}"
+            stem = f"{card_index:02d}-{_slugify(stem_heading)[:24]}"
+            cards.append(
+                {
+                    "index": card_index,
+                    "heading": heading if len(planned_cards) == 1 else f"{heading}（{page_idx}）",
+                    "kind": page_kind,
+                    "title": page_title,
+                    "subtitle": page_subtitle,
+                    "emphasis": emphasis,
+                    "bullets": page_points[:6],
+                    "stem": stem,
+                    "prompt": card_prompt,
+                }
+            )
+            card_index += 1
+            if card_index > 8:
+                break
+        if card_index > 8:
             break
 
     return analysis, cards
+
+
+def _attach_story_images(cards: list[dict[str, Any]], image_paths: list[str]) -> None:
+    if not image_paths:
+        return
+    targets = [card for card in cards if card["kind"] == "article_page"]
+    if not targets:
+        targets = [card for card in cards if card["kind"] != "text_cover"]
+    for card, image_path in zip(targets, image_paths):
+        card["image_path"] = image_path
+        card["prompt"] = f'{card["prompt"]}\n插图文件：{image_path}'
 
 
 def generate_article_story(
@@ -908,18 +1445,27 @@ def generate_article_story(
     height: int,
     strategy: str = "auto",
     mode: str = "all",
+    story_images: list[str] | None = None,
+    story_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     story_dir = Path(output_dir).expanduser().resolve()
     story_dir.mkdir(parents=True, exist_ok=True)
     prompts_dir = story_dir / "prompts"
     prompts_dir.mkdir(parents=True, exist_ok=True)
 
-    analysis, cards = _build_story_cards(prompt, strategy=strategy)
+    if story_plan:
+        analysis, cards = _build_story_cards_from_plan(story_plan)
+    else:
+        analysis, cards = _build_story_cards(prompt, strategy=strategy)
+        _attach_story_images(cards, story_images or [])
     resolved_strategy = analysis["strategy"]
     analysis_path = story_dir / "analysis.json"
     outline_path = story_dir / "outline.md"
+    plan_path = story_dir / "story-plan.json"
     analysis_path.write_text(json.dumps(analysis, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     outline_path.write_text(_render_outline_md(analysis), encoding="utf-8")
+    if story_plan:
+        plan_path.write_text(json.dumps(story_plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     results: list[dict[str, Any]] = []
 
     for card in cards:
@@ -956,6 +1502,7 @@ def generate_article_story(
         "strategy": resolved_strategy,
         "analysis": str(analysis_path),
         "outline": str(outline_path),
+        "story_plan": str(plan_path) if story_plan else None,
         "prompts_dir": str(prompts_dir),
         "count": len(cards),
         "generated_count": len(results),
@@ -1026,6 +1573,7 @@ def _compose_cover_svg(prompt: str, width: int, height: int) -> str:
 
 def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
     copy = _derive_info_copy(prompt, mode="text_cover")
+    controls = _resolve_render_controls(prompt)
     seed = _stable_int(prompt)
     focus_token = _extract_focus_token(copy["title"])
     is_tall = (height / max(width, 1)) >= 1.35
@@ -1036,44 +1584,59 @@ def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
         variant = "quote" if focus_token else ("note" if seed % 2 else "quote")
 
     if variant == "quote":
-        bg = "#F2ECFA"
-        ink = "#3E384D"
-        accent = "#FFBF47"
-        soft = "#DBCDF4"
-        quote_size = max(64, int(width * 0.11))
+        series_unified = controls.get("series_style") == "unified"
+        section_role = controls.get("section_role", "auto")
+        if controls["theme"] == "dark":
+            bg = "#161821"
+            ink = "#F3F5FF"
+            accent = "#7AA2FF" if controls["accent"] in {"auto", "blue"} else "#66D39E" if controls["accent"] == "green" else "#FFB86C" if controls["accent"] == "warm" else "#F28CC8"
+            soft = "#2A3146"
+        else:
+            bg = "#F2ECFA"
+            ink = "#3E384D"
+            accent = "#FFBF47" if controls["accent"] in {"auto", "warm"} else "#5B82F4" if controls["accent"] == "blue" else "#45B97C" if controls["accent"] == "green" else "#E67AB1"
+            soft = "#DBCDF4"
+        quote_size = max(56, int(width * 0.10))
+        title_scale_bump = 4 if section_role == "cover" else 2 if section_role == "chapter" else 0
         title_lines, title_size = _fit_text_block(
             copy["title"],
             [12, 10, 8, 7] if re.search(r"[\u4e00-\u9fff]", copy["title"]) else [20, 18, 16],
-            [max(54, int(width * 0.094)), max(48, int(width * 0.082)), max(42, int(width * 0.072))],
+            [max(60 + title_scale_bump, int(width * 0.102)), max(54 + title_scale_bump, int(width * 0.092)), max(46 + title_scale_bump, int(width * 0.080))],
             3,
-            max_width_px=width * 0.74,
+            max_width_px=width * 0.78,
             prefer_single_mixed_short=True,
         )
         subtitle_lines, subtitle_size = _fit_text_block(
             copy["subtitle"],
             [20, 16, 14] if re.search(r"[\u4e00-\u9fff]", copy["subtitle"]) else [30, 26, 22],
-            [max(22, int(width * 0.028)), max(20, int(width * 0.025)), max(18, int(width * 0.022))],
+            [max(22, int(width * 0.028)), max(20, int(width * 0.024)), max(18, int(width * 0.021))],
             2,
             max_width_px=width * 0.72,
         )
-        highlight_width = width * (0.30 if focus_token else 0.18)
-        title_y = height * (0.42 if is_tall else 0.46)
-        subtitle_y = min(height * 0.84, title_y + _text_block_height(title_lines, title_size, 1.08) + height * 0.10)
+        highlight_width = width * (0.34 if section_role == "cover" else 0.30 if focus_token else 0.18)
+        title_y = height * (0.36 if section_role == "cover" else 0.38 if is_tall else 0.43)
+        subtitle_y = min(height * 0.84, title_y + _text_block_height(title_lines, title_size, 1.04) + (height * 0.12 if series_unified else height * 0.10))
         return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <rect x="0" y="0" width="{width}" height="{height}" fill="{bg}"/>
-  <text x="{width*0.12:.2f}" y="{height*0.18:.2f}" font-family="Georgia, Times New Roman, serif" font-size="{quote_size}" font-weight="900" fill="{soft}">“</text>
-  <text x="{width*0.19:.2f}" y="{height*0.18:.2f}" font-family="Georgia, Times New Roman, serif" font-size="{quote_size}" font-weight="900" fill="{soft}">“</text>
-  <rect x="{width*0.40:.2f}" y="{height*(0.43 if is_tall else 0.47):.2f}" width="{highlight_width:.2f}" height="{height*0.03:.2f}" fill="{accent}"/>
-  {_svg_text_block(width*0.12, title_y, title_lines, title_size, ink, weight=900, line_gap=1.08)}
-  {_svg_text_block(width*0.12, subtitle_y, subtitle_lines[:2], subtitle_size, "#6C6680", weight=700, line_gap=1.18)}
-  <rect x="{width*0.82:.2f}" y="{height*0.92:.2f}" width="{width*0.08:.2f}" height="{height*0.012:.2f}" fill="{soft}"/>
+  <text x="{width*0.10:.2f}" y="{height*(0.14 if series_unified else 0.16):.2f}" font-family="Georgia, Times New Roman, serif" font-size="{quote_size}" font-weight="900" fill="{soft}" opacity="0.8">“</text>
+  <text x="{width*0.16:.2f}" y="{height*(0.14 if series_unified else 0.16):.2f}" font-family="Georgia, Times New Roman, serif" font-size="{quote_size}" font-weight="900" fill="{soft}" opacity="0.8">“</text>
+  <rect x="{width*0.40:.2f}" y="{height*(0.395 if is_tall else 0.445):.2f}" width="{highlight_width:.2f}" height="{height*0.028:.2f}" fill="{accent}"/>
+  {_svg_text_block(width*0.12, title_y, title_lines, title_size, ink, weight=900, line_gap=1.04)}
+  {_svg_text_block(width*0.12, subtitle_y, subtitle_lines[:2], subtitle_size, "#7A738B", weight=620, line_gap=1.20)}
 </svg>'''
 
-    card_bg = "#5B82F4"
-    paper = "#FFFDF8"
-    shadow = "#C7D5FF"
-    ink = "#121212"
-    meta = "#5B82F4"
+    if controls["theme"] == "dark":
+        card_bg = "#1E2740"
+        paper = "#10141F"
+        shadow = "#2D3A5F"
+        ink = "#F6F7FB"
+        meta = "#87A3FF"
+    else:
+        card_bg = "#5B82F4"
+        paper = "#FFFDF8"
+        shadow = "#C7D5FF"
+        ink = "#121212"
+        meta = "#5B82F4"
     emoji = "🤔" if "为什么" in copy["title"] or "为啥" in copy["title"] else "..."
     paper_x = width * 0.08
     paper_y = height * 0.08
@@ -1101,8 +1664,10 @@ def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
 
 
 def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
+    image_paths = _extract_story_image_paths(prompt)
     copy = _derive_info_copy(prompt, mode="infographic")
-    kind = _infer_infographic_kind(prompt)
+    controls = _resolve_render_controls(prompt)
+    kind = _infer_infographic_kind(_strip_image_directives(prompt))
     title_lines, title_size = _fit_text_block(
         copy["title"],
         [16, 14, 12] if re.search(r"[\u4e00-\u9fff]", copy["title"]) else [24, 22, 20],
@@ -1120,56 +1685,369 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
     )
     bullets = copy["bullets"][:]
 
+    if kind == "article_page":
+        theme_dark = controls["theme"] == "dark"
+        comfy = controls["density"] != "compact"
+        accent = "#5B82F4" if controls["accent"] in {"auto", "blue"} else "#45B97C" if controls["accent"] == "green" else "#E67E22" if controls["accent"] == "warm" else "#D96DB4"
+        series_unified = controls.get("series_style") == "unified"
+        section_role = controls.get("section_role", "auto")
+        kicker_text = _visible_kicker(copy)
+        paragraphs = bullets[:6] or ["把原文段落按正常文章方式排版，优先保证阅读流畅。"]
+        body_top = height * 0.15
+        kicker_size = max(14, int(width * 0.016))
+        title_boost = 5 if section_role == "chapter" else 2 if section_role == "summary" else 0
+        title_lines, title_size = _fit_text_block(
+            copy["title"],
+            [18, 16, 14] if re.search(r"[\u4e00-\u9fff]", copy["title"]) else [24, 22, 20],
+            [max(40 + title_boost, int(width*0.052)), max(34 + title_boost, int(width*0.046)), max(30 + title_boost, int(width*0.042))],
+            3,
+            max_width_px=width * 0.82,
+            prefer_single_mixed_short=True,
+        )
+        subtitle_lines, subtitle_size = _fit_text_block(
+            copy["subtitle"],
+            [22, 20, 18] if re.search(r"[\u4e00-\u9fff]", copy["subtitle"]) else [30, 26, 24],
+            [max(20, int(width*0.024)), max(18, int(width*0.022)), max(16, int(width*0.020))],
+            2,
+            max_width_px=width * 0.82,
+        )
+        title_y = body_top
+        subtitle_y = title_y + _text_block_height(title_lines, title_size, 1.08) + (height * 0.024 if series_unified else height * 0.026)
+        accent_rule_y = subtitle_y + _text_block_height(subtitle_lines, subtitle_size, 1.10) + (height * 0.026 if section_role == "chapter" else height * 0.022)
+        paper_top = accent_rule_y + (height * 0.038 if section_role == "chapter" else height * 0.03)
+        paper_h = height - paper_top - height * 0.05
+        text_x = width * 0.12
+        text_w = width * 0.80
+        visual_y = paper_top + height * 0.03
+        visual_h = 0.0
+        has_visual = bool(image_paths) or any(
+            re.search(r"`[^`]+`|[A-Za-z0-9_]+\.[A-Za-z0-9_]+|github|plugin|codex|claude", p, flags=re.IGNORECASE)
+            for p in paragraphs
+        )
+        if has_visual:
+            visual_h = min(height * 0.24, paper_h * 0.30)
+        blocks: list[str] = [
+            f'<rect x="{width*0.06:.2f}" y="{paper_top:.2f}" width="{width*0.88:.2f}" height="{paper_h:.2f}" rx="28" fill="{"#171C28" if theme_dark else "#FFFDF9"}"/>'
+        ]
+        if has_visual:
+            card_x = width * 0.14
+            card_w = width * 0.64
+            image_uri = _image_data_uri(image_paths[0]) if image_paths else None
+            if image_uri:
+                blocks.append(f'<clipPath id="articleClip"><rect x="{card_x:.2f}" y="{visual_y:.2f}" width="{card_w:.2f}" height="{visual_h:.2f}" rx="18"/></clipPath>')
+                blocks.append(f'<rect x="{card_x:.2f}" y="{visual_y:.2f}" width="{card_w:.2f}" height="{visual_h:.2f}" rx="18" fill="{"#202636" if theme_dark else "#F7F7FA"}"/>')
+                blocks.append(f'<image href="{image_uri}" x="{card_x:.2f}" y="{visual_y:.2f}" width="{card_w:.2f}" height="{visual_h:.2f}" preserveAspectRatio="xMidYMid meet" clip-path="url(#articleClip)"/>')
+            else:
+                blocks.append(f'<rect x="{card_x:.2f}" y="{visual_y:.2f}" width="{card_w:.2f}" height="{visual_h:.2f}" rx="18" fill="#151722"/>')
+                blocks.append(f'<rect x="{card_x:.2f}" y="{visual_y:.2f}" width="{card_w:.2f}" height="{visual_h*0.18:.2f}" rx="18" fill="#23263A"/>')
+                blocks.append(f'<circle cx="{card_x + card_w*0.08:.2f}" cy="{visual_y + visual_h*0.09:.2f}" r="{width*0.010:.2f}" fill="#FF7A7A"/>')
+                blocks.append(f'<circle cx="{card_x + card_w*0.13:.2f}" cy="{visual_y + visual_h*0.09:.2f}" r="{width*0.010:.2f}" fill="#FFC857"/>')
+                blocks.append(f'<circle cx="{card_x + card_w*0.18:.2f}" cy="{visual_y + visual_h*0.09:.2f}" r="{width*0.010:.2f}" fill="#43E39B"/>')
+                blocks.append(_svg_text_block(card_x + card_w*0.06, visual_y + visual_h*0.15, ["OpenClaw / Config / Plugin Note"], max(13, int(width*0.014)), "#F4F6FF", weight=700))
+                for idx in range(4):
+                    line_y = visual_y + visual_h*0.30 + idx * visual_h*0.13
+                    blocks.append(f'<rect x="{card_x + card_w*0.07:.2f}" y="{line_y:.2f}" width="{card_w*(0.72 - idx*0.08):.2f}" height="{visual_h*0.06:.2f}" rx="8" fill="#8F99FF" fill-opacity="{0.75 - idx*0.10:.2f}"/>')
+            blocks.append(f'<rect x="{card_x:.2f}" y="{visual_y + visual_h + height*0.014:.2f}" width="{card_w:.2f}" height="{height*0.0025:.2f}" rx="2" fill="{"#30384A" if theme_dark else "#ECE7DD"}"/>')
+        current_y = visual_y + visual_h + (height * 0.04 if has_visual else height * 0.03)
+        for idx, para in enumerate(paragraphs):
+            code_like = bool(re.search(r"`[^`]+`|[A-Za-z0-9_]+\.[A-Za-z0-9_]+|https?://", para))
+            chinese_wraps, latin_wraps, size_candidates, width_factor = _article_body_wrap_profile(para)
+            line_gap, para_gap = _article_paragraph_rhythm(para, height, code_like=code_like)
+            if controls["density"] == "compact":
+                line_gap = max(1.08, line_gap - 0.10)
+                para_gap *= 0.84
+            elif controls["density"] == "comfy":
+                line_gap += 0.06
+                para_gap *= 1.10
+            scaled_sizes = [
+                max(size_candidates[0], int(width * 0.028)),
+                max(size_candidates[1], int(width * 0.026)),
+                max(size_candidates[2], int(width * 0.024)),
+            ] if not code_like else [
+                max(size_candidates[0], int(width * 0.020)),
+                max(size_candidates[1], int(width * 0.018)),
+                max(size_candidates[2], int(width * 0.017)),
+            ]
+            max_lines = 3 if code_like else 4
+            p_lines, p_size = _fit_body_block(
+                para,
+                max_width_px=text_w * width_factor,
+                chinese_wraps=chinese_wraps,
+                latin_wraps=latin_wraps,
+                size_candidates=scaled_sizes,
+                max_lines=max_lines,
+            )
+            if code_like:
+                p_h = _text_block_height(p_lines, p_size, line_gap) + height * 0.05
+                blocks.append(f'<rect x="{text_x:.2f}" y="{current_y:.2f}" width="{text_w:.2f}" height="{p_h:.2f}" rx="16" fill="{"#2C2430" if theme_dark else "#FFF7E8"}"/>')
+                blocks.append(_svg_text_block(text_x + width*0.03, current_y + height*0.035, p_lines, p_size, "#EBCFA0" if theme_dark else "#7B5B16", weight=680, line_gap=line_gap))
+            else:
+                p_h = _text_block_height(p_lines, p_size, line_gap)
+                body_color = "#D9E1F0" if theme_dark else "#6A5A3E"
+                body_weight = 500 if section_role == "chapter" else 470
+                blocks.append(_svg_text_block(text_x, current_y + p_size, p_lines, p_size, body_color, weight=body_weight, line_gap=line_gap + 0.02))
+            current_y += p_h + para_gap
+            if current_y > paper_top + paper_h - height * 0.08:
+                break
+        return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+  <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0F1320" if theme_dark else "#F8F6F1"}"/>
+  {_svg_text_block(width*0.12, height*0.10, [kicker_text], kicker_size, "#7F8AA3" if theme_dark else "#B3A79A", weight=700) if kicker_text else ''}
+  {_svg_text_block(width*0.12, title_y, title_lines, title_size, "#F4F7FF" if theme_dark else "#6A531D", weight=900, line_gap=1.06)}
+  {_svg_text_block(width*0.12, subtitle_y, subtitle_lines, subtitle_size, "#B4BED4" if theme_dark else "#8F8779", weight=700, line_gap=1.10)}
+  <rect x="{width*0.12:.2f}" y="{accent_rule_y:.2f}" width="{width*(0.17 if section_role == "chapter" else 0.14):.2f}" height="{height*(0.007 if series_unified else 0.006):.2f}" rx="{height*0.003:.2f}" fill="{accent if not theme_dark else "#33415D"}"/>
+  <g>{''.join(blocks)}</g>
+  <rect x="0" y="{height*0.985:.2f}" width="{width}" height="{height*0.015:.2f}" fill="{accent if not theme_dark else "#1E2638"}"/>
+</svg>'''
+
+    if kind == "article_note":
+        theme_dark = controls["theme"] == "dark"
+        accent = "#5B82F4" if controls["accent"] in {"auto", "blue"} else "#45B97C" if controls["accent"] == "green" else "#E67E22" if controls["accent"] == "warm" else "#D96DB4"
+        kicker_text = _visible_kicker(copy)
+        footer_lines = _footer_lines(copy)
+        notes = bullets[:5] or ["保留关键字段与命令，再给出简短说明。"]
+        title_y = height * 0.15
+        subtitle_y = title_y + _text_block_height(title_lines, title_size, 1.04) + height * 0.026
+        note_top = subtitle_y + _text_block_height(subtitle_lines[:2], subtitle_size, 1.08) + height * 0.04
+        min_row_h = height * (0.095 if controls["density"] == "compact" else 0.11 if controls["density"] == "comfy" else 0.10)
+        row_h, row_gap = _tight_row_metrics(height, note_top, min_row_h, len(notes))
+        blocks: list[str] = []
+        for idx, note in enumerate(notes):
+            y = note_top + idx * (row_h + row_gap)
+            head, desc = _split_bullet_copy(note)
+            if desc == "提炼重点信息，保持清晰易读。":
+                desc = "关键配置或命令，建议原样保留。"
+            code_like = bool(re.search(r"`[^`]+`|[A-Za-z0-9_]+\.[A-Za-z0-9_]+", note))
+            head_lines, head_size = _fit_body_block(
+                head,
+                max_width_px=width * 0.60,
+                chinese_wraps=[24, 22, 20],
+                latin_wraps=[34, 30, 26],
+                size_candidates=[
+                    max(24 if controls["density"] != "compact" else 22, int(width*0.030)),
+                    max(20, int(width*0.026)),
+                    max(18, int(width*0.024)),
+                ],
+                max_lines=2,
+            )
+            desc_lines, desc_size = _fit_body_block(
+                desc,
+                max_width_px=width * 0.58,
+                chinese_wraps=[28, 24, 22],
+                latin_wraps=[42, 36, 32],
+                size_candidates=[
+                    max(17 if controls["density"] == "comfy" else 16, int(width*0.021)),
+                    max(15, int(width*0.018)),
+                    max(14, int(width*0.017)),
+                ],
+                max_lines=2,
+            )
+            blocks.append(f'<rect x="{width*0.08:.2f}" y="{y:.2f}" width="{width*0.84:.2f}" height="{row_h:.2f}" rx="20" fill="{"#161D2A" if theme_dark else "#FFFFFF"}"/>')
+            blocks.append(f'<rect x="{width*0.10:.2f}" y="{y + row_h*0.18:.2f}" width="{width*0.010:.2f}" height="{row_h*0.56:.2f}" rx="7" fill="{(accent if not theme_dark else "#4867A8") if code_like else ("#2A3B5A" if theme_dark else "#D9DEFF")}"/>')
+            if code_like:
+                blocks.append(f'<rect x="{width*0.16:.2f}" y="{y + row_h*0.16:.2f}" width="{width*0.52:.2f}" height="{height*0.030:.2f}" rx="12" fill="{"#1D2638" if theme_dark else "#F5F1FF"}"/>')
+                blocks.append(_svg_text_block(width*0.18, y + row_h*0.16 + height*0.021, head_lines, max(16, head_size-2), accent if not theme_dark else "#D6C6FF", weight=900, line_gap=1.02))
+                blocks.append(_svg_text_block(width*0.16, y + row_h*0.56, desc_lines, desc_size, "#A6B0C5" if theme_dark else "#7E869B", weight=700, line_gap=1.08))
+            else:
+                blocks.append(_svg_text_block(width*0.16, y + row_h*0.36, head_lines, head_size, "#F4F7FF" if theme_dark else "#243047", weight=820, line_gap=1.05))
+                blocks.append(_svg_text_block(width*0.16, y + row_h*0.64, desc_lines, desc_size, "#A6B0C5" if theme_dark else "#7E869B", weight=700, line_gap=1.08))
+        return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+  <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0F1320" if theme_dark else "#F5F6FC"}"/>
+  {f'<rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.22:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="{"#1A2234" if theme_dark else "#EEF2FF"}"/>{_svg_text_block(width*0.10, height*0.105, [kicker_text], max(14, int(width*0.017)), accent if not theme_dark else "#BFD0FF", weight=800)}' if kicker_text else ''}
+  {_svg_text_block(width*0.07, title_y, title_lines, title_size, "#F4F7FF" if theme_dark else "#243047", weight=900, line_gap=1.05)}
+  {_svg_text_block(width*0.07, subtitle_y, subtitle_lines[:2], subtitle_size, "#A6B0C5" if theme_dark else "#7E869B", weight=700, line_gap=1.08)}
+  <g>{''.join(blocks)}</g>
+  {_svg_text_block(width*0.50, height*0.95, footer_lines, max(14, int(width*0.018)), "#8F99AF" if theme_dark else "#A7ADBF", weight=600, anchor="middle") if footer_lines else ''}
+</svg>'''
+
+    if kind == "article":
+        paragraphs = bullets[:5] or ["把大段内容按正常文章方式排开，优先保证阅读流畅。"]
+        kicker_text = _visible_kicker(copy)
+        footer_lines = _footer_lines(copy)
+        title_y = height * 0.15
+        subtitle_y = title_y + _text_block_height(title_lines, title_size, 1.04) + height * 0.026
+        kicker_y = subtitle_y + _text_block_height(subtitle_lines[:2], subtitle_size, 1.08) + height * 0.028
+        paper_y = kicker_y + height * 0.04
+        paper_h = height - paper_y - height * 0.08
+        para_gap = height * 0.026
+        paragraph_h = (paper_h - para_gap * (len(paragraphs) - 1) - height * 0.06) / max(1, len(paragraphs))
+        body: list[str] = [
+            f'<rect x="{width*0.07:.2f}" y="{paper_y:.2f}" width="{width*0.86:.2f}" height="{paper_h:.2f}" rx="28" fill="#FFFFFF"/>'
+        ]
+        for idx, paragraph in enumerate(paragraphs):
+            y = paper_y + height * 0.04 + idx * (paragraph_h + para_gap)
+            lines, size = _fit_body_block(
+                paragraph,
+                max_width_px=width * 0.72,
+                chinese_wraps=[26, 24, 22],
+                latin_wraps=[38, 34, 30],
+                size_candidates=[max(23, int(width*0.028)), max(21, int(width*0.026)), max(19, int(width*0.024))],
+                max_lines=3,
+            )
+            body.append(f'<rect x="{width*0.11:.2f}" y="{y - paragraph_h*0.10:.2f}" width="{width*0.78:.2f}" height="{paragraph_h:.2f}" rx="18" fill="#F7F8FC"/>')
+            body.append(f'<rect x="{width*0.13:.2f}" y="{y + paragraph_h*0.10:.2f}" width="{width*0.010:.2f}" height="{paragraph_h*0.45:.2f}" rx="7" fill="#D9DEFF"/>')
+            body.append(_svg_text_block(width*0.17, y + paragraph_h*0.22, lines, size, "#394156", weight=760, line_gap=1.12))
+        return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+  <rect x="0" y="0" width="{width}" height="{height}" fill="#F5F6FC"/>
+  {f'<rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.22:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="#EEF2FF"/>{_svg_text_block(width*0.10, height*0.105, [kicker_text], max(14, int(width*0.017)), "#6B74D8", weight=800)}' if kicker_text else ''}
+  {_svg_text_block(width*0.07, title_y, title_lines, title_size, "#243047", weight=900, line_gap=1.05)}
+  {_svg_text_block(width*0.07, subtitle_y, subtitle_lines[:2], subtitle_size, "#7E869B", weight=700, line_gap=1.08)}
+  {f'<rect x="{width*0.07:.2f}" y="{kicker_y:.2f}" width="{width*0.12:.2f}" height="{height*0.04:.2f}" rx="16" fill="#F2EEFF"/>{_svg_text_block(width*0.10, kicker_y + height*0.026, [copy["emphasis"]], max(18, int(width*0.022)), "#7A59E6", weight=900)}' if copy["emphasis"] else ''}
+  <g>{''.join(body)}</g>
+  {_svg_text_block(width*0.50, height*0.95, footer_lines, max(14, int(width*0.018)), "#A7ADBF", weight=600, anchor="middle") if footer_lines else ''}
+</svg>'''
+
+    if kind == "checklist":
+        theme_dark = controls["theme"] == "dark"
+        accent = "#5B82F4" if controls["accent"] in {"auto", "blue"} else "#45B97C" if controls["accent"] == "green" else "#E67E22" if controls["accent"] == "warm" else "#D96DB4"
+        section_role = controls.get("section_role", "auto")
+        kicker_text = _visible_kicker(copy)
+        footer_lines = _footer_lines(copy)
+        items = bullets[:5] or ["升级前先备份配置", "先跑 doctor", "确认插件来源", "最后再恢复渠道配置"]
+        title_y = height * 0.15
+        subtitle_y = title_y + _text_block_height(title_lines, title_size, 1.04) + height * 0.024
+        badge_y = subtitle_y + _text_block_height(subtitle_lines[:2], subtitle_size, 1.08) + height * 0.028
+        list_top = badge_y + (height * 0.062 if section_role == "summary" else height * 0.056)
+        min_row_h = height * (0.095 if controls["density"] == "compact" else 0.11 if controls["density"] == "comfy" else 0.10)
+        row_h, row_gap = _tight_row_metrics(height, list_top, min_row_h, len(items))
+        checks: list[str] = []
+        colors = [
+            accent,
+            "#F06AB2" if accent != "#D96DB4" else "#5B82F4",
+            "#35C5F2" if accent != "#5B82F4" else "#45B97C",
+            "#43E39B" if accent != "#45B97C" else "#E67E22",
+            "#FFB84D" if accent != "#E67E22" else "#D96DB4",
+        ]
+        for idx, item in enumerate(items):
+            y = list_top + idx * (row_h + row_gap)
+            lines, size = _fit_body_block(
+                item,
+                max_width_px=width * 0.62,
+                chinese_wraps=[24, 22, 20],
+                latin_wraps=[34, 30, 26],
+                size_candidates=[
+                    max(24 if controls["density"] != "compact" else 22, int(width*0.030)),
+                    max(21 if controls["density"] == "comfy" else 20, int(width*0.027)),
+                    max(18, int(width*0.024)),
+                ],
+                max_lines=2,
+            )
+            checks.append(f'<rect x="{width*0.08:.2f}" y="{y:.2f}" width="{width*0.84:.2f}" height="{row_h:.2f}" rx="20" fill="{"#161D2A" if theme_dark else "#FFFFFF"}"/>')
+            checks.append(f'<circle cx="{width*0.14:.2f}" cy="{y + row_h*0.40:.2f}" r="{width*0.028:.2f}" fill="{colors[idx % len(colors)]}"/>')
+            checks.append(_svg_text_block(width*0.14, y + row_h*0.44, ["✓"], max(18, int(width*0.022)), "#FFFFFF", weight=900, anchor="middle"))
+            checks.append(_svg_text_block(width*0.20, y + row_h*0.42, lines, size, "#EFF3FF" if theme_dark else "#2A2F45", weight=820, line_gap=1.08))
+        return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+  <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0F1320" if theme_dark else "#F5F6FC"}"/>
+  {f'<rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.24:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="{"#1A2234" if theme_dark else "#EEF2FF"}"/>{_svg_text_block(width*0.10, height*0.105, [kicker_text], max(14, int(width*0.017)), accent if not theme_dark else "#BFD0FF", weight=800)}' if kicker_text else ''}
+  {_svg_text_block(width*0.07, title_y, title_lines, title_size, "#F4F7FF" if theme_dark else "#243047", weight=900, line_gap=1.05)}
+  {_svg_text_block(width*0.07, subtitle_y, subtitle_lines[:2], subtitle_size, "#B7C0D5" if theme_dark else "#7E869B", weight=700, line_gap=1.08)}
+  {f'<rect x="{width*0.07:.2f}" y="{badge_y:.2f}" width="{width*0.14:.2f}" height="{height*0.04:.2f}" rx="16" fill="{"#1C2538" if theme_dark else "#F2EEFF"}"/>{_svg_text_block(width*0.10, badge_y + height*0.026, [copy["emphasis"]], max(18, int(width*0.022)), accent if not theme_dark else "#D3BEFF", weight=900)}' if copy["emphasis"] else ''}
+  <g>{''.join(checks)}</g>
+  {_svg_text_block(width*0.50, height*0.95, footer_lines, max(14, int(width*0.018)), "#8F99AF" if theme_dark else "#A7ADBF", weight=600, anchor="middle") if footer_lines else ''}
+</svg>'''
+
     if kind == "map":
+        theme_dark = controls["theme"] == "dark"
+        accent_base = "#5B82F4" if controls["accent"] in {"auto", "blue"} else "#45B97C" if controls["accent"] == "green" else "#E67E22" if controls["accent"] == "warm" else "#D96DB4"
+        series_unified = controls.get("series_style") == "unified"
+        section_role = controls.get("section_role", "auto")
+        kicker_text = _visible_kicker(copy)
+        footer_lines = _footer_lines(copy)
         zones = bullets[:3] or [
             "编码代理：Claude Code、Codex、Gemini CLI，强调终端执行与代理能力",
             "AI IDE：Cursor、Windsurf、GitHub Copilot，强调上下文与协作",
             "云端开发与应用生成：Replit、Lovable、Bolt.new，强调原型与部署",
         ]
-        title_y = height * 0.15
-        subtitle_y = title_y + _text_block_height(title_lines, title_size, 1.04) + height * 0.028
-        badge_y = subtitle_y + _text_block_height(subtitle_lines[:2], subtitle_size, 1.08) + height * 0.028
-        zone_top = badge_y + height * 0.05
-        zone_gap = height * 0.035
-        zone_h = (height - zone_top - height * 0.12 - zone_gap * 2) / 3
-        colors = [("#EAF0FF", "#6B74D8"), ("#F8EEFF", "#C75BCE"), ("#ECFFF5", "#32A56A")]
+        role_title_bump = 5 if section_role == "chapter" else 2 if section_role == "summary" else 0
+        map_title_size = title_size + role_title_bump
+        title_y = height * (0.14 if section_role == "chapter" else 0.15)
+        subtitle_y = title_y + _text_block_height(title_lines, map_title_size, 1.04) + (height * 0.03 if section_role == "chapter" else height * 0.028)
+        subtitle_gap = height * (0.03 if series_unified else 0.028)
+        badge_y = subtitle_y + _text_block_height(subtitle_lines[:2], subtitle_size, 1.08) + subtitle_gap
+        zone_top = badge_y + (height * 0.055 if section_role == "chapter" else height * 0.05)
+        zone_gap = height * (0.03 if series_unified else 0.035)
+        available_h = height - zone_top - height * 0.12 - zone_gap * max(0, len(zones) - 1)
+        colors = [
+            (("#18243B" if theme_dark else "#EAF0FF"), accent_base),
+            (("#2A1E39" if theme_dark else "#F8EEFF"), "#C75BCE" if accent_base != "#D96DB4" else "#5B82F4"),
+            (("#162D28" if theme_dark else "#ECFFF5"), "#32A56A" if accent_base != "#45B97C" else "#E67E22"),
+        ]
+        zone_specs: list[tuple[list[str], int, list[str], int]] = []
+        desired_heights: list[float] = []
+        min_zone_h = height * 0.18
         blocks: list[str] = []
-        for idx, item in enumerate(zones):
+        for item in zones:
             heading, desc = _split_bullet_copy(item)
-            y = zone_top + idx * (zone_h + zone_gap)
-            bg_fill, accent = colors[idx % len(colors)]
             heading_lines, heading_size = _fit_body_block(
                 heading,
                 max_width_px=width * 0.64,
                 chinese_wraps=[16, 14, 12],
                 latin_wraps=[26, 22, 18],
-                size_candidates=[max(28, int(width*0.034)), max(24, int(width*0.030)), max(20, int(width*0.026))],
+                size_candidates=[
+                    max(30 if controls["density"] != "compact" else 28, int(width*0.036)),
+                    max(24, int(width*0.030)),
+                    max(20, int(width*0.026)),
+                ],
                 max_lines=2,
             )
             desc_lines, desc_size = _fit_body_block(
                 desc,
                 max_width_px=width * 0.66,
-                chinese_wraps=[34, 30, 26],
-                latin_wraps=[50, 44, 38],
-                size_candidates=[max(19, int(width*0.023)), max(17, int(width*0.021)), max(15, int(width*0.019))],
-                max_lines=2,
+                chinese_wraps=[40, 36, 32],
+                latin_wraps=[56, 48, 42],
+                size_candidates=[
+                    max(20 if controls["density"] == "comfy" else 19, int(width*0.024)),
+                    max(17, int(width*0.021)),
+                    max(15, int(width*0.019)),
+                ],
+                max_lines=3,
             )
+            heading_h = _text_block_height(heading_lines, heading_size, 1.05)
+            desc_h = _text_block_height(desc_lines, desc_size, 1.08)
+            desired_heights.append(max(min_zone_h, height * 0.09 + heading_h + desc_h + height * 0.09))
+            zone_specs.append((heading_lines, heading_size, desc_lines, desc_size))
+        total_desired = sum(desired_heights)
+        if total_desired <= available_h:
+            zone_heights = desired_heights
+        else:
+            scale = available_h / total_desired
+            zone_heights = [max(min_zone_h * 0.92, h * scale) for h in desired_heights]
+            diff = available_h - sum(zone_heights)
+            if zone_heights:
+                zone_heights[-1] += diff
+        current_y = zone_top
+        for idx, item in enumerate(zones):
+            heading, desc = _split_bullet_copy(item)
+            heading_lines, heading_size, desc_lines, desc_size = zone_specs[idx]
+            zone_h = zone_heights[idx]
+            y = current_y
+            current_y += zone_h + zone_gap
+            bg_fill, zone_accent = colors[idx % len(colors)]
+            heading_y = y + zone_h * 0.24
+            desc_y = heading_y + _text_block_height(heading_lines, heading_size, 1.05) + max(height * 0.022, zone_h * 0.11)
+            max_desc_y = y + zone_h - max(height * 0.05, zone_h * 0.18)
+            if desc_y > max_desc_y:
+                desc_y = max_desc_y
             blocks.append(f'<rect x="{width*0.08:.2f}" y="{y:.2f}" width="{width*0.84:.2f}" height="{zone_h:.2f}" rx="24" fill="{bg_fill}"/>')
-            blocks.append(f'<rect x="{width*0.10:.2f}" y="{y + zone_h*0.18:.2f}" width="{width*0.012:.2f}" height="{zone_h*0.62:.2f}" rx="8" fill="{accent}"/>')
-            blocks.append(_svg_text_block(width*0.15, y + zone_h*0.31, heading_lines, heading_size, "#243047", weight=900, line_gap=1.05))
-            blocks.append(_svg_text_block(width*0.15, y + zone_h*0.60, desc_lines, desc_size, "#667089", weight=700, line_gap=1.08))
+            blocks.append(f'<rect x="{width*0.10:.2f}" y="{y + zone_h*0.18:.2f}" width="{width*0.012:.2f}" height="{zone_h*0.62:.2f}" rx="8" fill="{zone_accent}"/>')
+            blocks.append(_svg_text_block(width*0.15, heading_y, heading_lines, heading_size, "#F4F7FF" if theme_dark else "#243047", weight=900, line_gap=1.05))
+            blocks.append(_svg_text_block(width*0.15, desc_y, desc_lines, desc_size, "#A6B0C5" if theme_dark else "#667089", weight=700, line_gap=1.08))
         return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
-  <rect x="0" y="0" width="{width}" height="{height}" fill="#F5F6FC"/>
-  <rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.24:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="#EEF2FF"/>
-  {_svg_text_block(width*0.10, height*0.105, [copy["kicker"] or "产品地图"], max(14, int(width*0.017)), "#6B74D8", weight=800)}
-  {_svg_text_block(width*0.08, title_y, title_lines, title_size, "#243047", weight=900, line_gap=1.04)}
-  {_svg_text_block(width*0.08, subtitle_y, subtitle_lines[:2], subtitle_size, "#7E869B", weight=700, line_gap=1.08)}
-  {f'<rect x="{width*0.08:.2f}" y="{badge_y:.2f}" width="{width*0.12:.2f}" height="{height*0.04:.2f}" rx="16" fill="#F2EEFF"/>{_svg_text_block(width*0.11, badge_y + height*0.026, [copy["emphasis"]], max(18, int(width*0.022)), "#7A59E6", weight=900)}' if copy["emphasis"] else ''}
+  <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0F1320" if theme_dark else "#F5F6FC"}"/>
+  {f'<rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.24:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="{"#1A2234" if theme_dark else "#EEF2FF"}"/>{_svg_text_block(width*0.10, height*0.105, [kicker_text], max(14, int(width*0.017)), accent_base if not theme_dark else "#BFD0FF", weight=800)}' if kicker_text else ''}
+  {_svg_text_block(width*0.08, title_y, title_lines, map_title_size, "#F4F7FF" if theme_dark else "#243047", weight=900, line_gap=1.04)}
+  {_svg_text_block(width*0.08, subtitle_y, subtitle_lines[:2], subtitle_size, "#A6B0C5" if theme_dark else "#7E869B", weight=700, line_gap=1.08)}
+  {f'<rect x="{width*0.08:.2f}" y="{badge_y:.2f}" width="{width*0.12:.2f}" height="{height*0.04:.2f}" rx="16" fill="{"#1C2538" if theme_dark else "#F2EEFF"}"/>{_svg_text_block(width*0.11, badge_y + height*0.026, [copy["emphasis"]], max(18, int(width*0.022)), accent_base if not theme_dark else "#D3BEFF", weight=900)}' if copy["emphasis"] else ''}
   <g>{''.join(blocks)}</g>
-  {_svg_text_block(width*0.50, height*0.94, ["按产品形态看清当前 Vibe Coding 版图"], max(14, int(width*0.018)), "#A7ADBF", weight=600, anchor="middle")}
+  {_svg_text_block(width*0.50, height*0.94, footer_lines, max(14, int(width*0.018)), "#8F99AF" if theme_dark else "#A7ADBF", weight=600, anchor="middle") if footer_lines else ''}
 </svg>'''
 
     if kind == "catalog":
+        theme_dark = controls["theme"] == "dark"
+        accent = "#5B82F4" if controls["accent"] in {"auto", "blue"} else "#45B97C" if controls["accent"] == "green" else "#E67E22" if controls["accent"] == "warm" else "#D96DB4"
+        series_unified = controls.get("series_style") == "unified"
+        section_role = controls.get("section_role", "auto")
+        kicker_text = _visible_kicker(copy)
+        footer_lines = _footer_lines(copy)
         mixed_title = bool(re.search(r"[\u4e00-\u9fff]", copy["title"]) and re.search(r"[A-Za-z]", copy["title"]))
         compact_title = re.sub(r"\s+", "", copy["title"])
         if mixed_title and len(compact_title) <= 20:
@@ -1177,15 +2055,17 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
         else:
             catalog_title_lines = _wrap_text(copy["title"], 12 if mixed_title else 8 if re.search(r"[\u4e00-\u9fff]", copy["title"]) else 16)
         catalog_subtitle_lines = subtitle_lines[:2]
-        catalog_title_size = max(34, int(width*0.050)) if len(catalog_title_lines) == 1 else max(30, int(width*0.046))
-        catalog_title_y = height * 0.16
-        catalog_subtitle_y = catalog_title_y + len(catalog_title_lines) * catalog_title_size * 1.02 + height * 0.02
-        catalog_badge_y = catalog_subtitle_y + max(1, len(catalog_subtitle_lines)) * max(15, int(width*0.019)) * 1.08 + height * 0.025
+        title_bump = 4 if section_role == "chapter" else 2 if section_role == "summary" else 0
+        catalog_title_size = (max(34, int(width*0.050)) if len(catalog_title_lines) == 1 else max(30, int(width*0.046))) + title_bump
+        catalog_title_y = height * (0.15 if section_role == "chapter" else 0.16)
+        catalog_subtitle_y = catalog_title_y + len(catalog_title_lines) * catalog_title_size * 1.02 + (height * 0.022 if series_unified else height * 0.02)
+        catalog_badge_y = catalog_subtitle_y + max(1, len(catalog_subtitle_lines)) * max(15, int(width*0.019)) * 1.08 + (height * 0.03 if section_role == "chapter" else height * 0.025)
         rows = bullets[:6] or ["Cursor / AI IDE / Agent 与代码库上下文", "Windsurf / Agent IDE / 流程驱动与协作", "GitHub Copilot / 编程助手 / 生态广上手快"]
-        row_h, row_gap = _tight_row_metrics(height, catalog_badge_y + height * 0.042, height * 0.11, len(rows))
+        min_row_h = height * (0.105 if controls["density"] == "compact" else 0.125 if controls["density"] == "comfy" else 0.11)
+        row_h, row_gap = _tight_row_metrics(height, catalog_badge_y + height * 0.042, min_row_h, len(rows))
         cards: list[str] = []
         start_y = catalog_badge_y + height * 0.03
-        colors = ["#6F67DE", "#F06AB2", "#35C5F2", "#43E39B", "#FFB84D", "#8B4DB4"]
+        colors = [accent, "#F06AB2", "#35C5F2", "#43E39B", "#FFB84D", "#8B4DB4"]
         for idx, row in enumerate(rows):
             y = start_y + idx * (row_h + row_gap)
             name, role, desc = _split_catalog_row(row)
@@ -1213,7 +2093,11 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
                 max_width_px=width * 0.68,
                 chinese_wraps=[34, 30, 26],
                 latin_wraps=[48, 42, 36],
-                size_candidates=[max(17, int(width*0.021)), max(16, int(width*0.020)), max(15, int(width*0.018))],
+                size_candidates=[
+                    max(18 if controls["density"] != "compact" else 17, int(width*0.022)),
+                    max(16, int(width*0.020)),
+                    max(15, int(width*0.018)),
+                ],
                 max_lines=2,
             )
             name_h = _text_block_height(name_lines, name_size, 1.02)
@@ -1226,27 +2110,31 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
             max_desc_y = y + card_body_h - max(height * 0.03, card_body_h * 0.14)
             if desc_y > max_desc_y:
                 desc_y = max_desc_y
-            cards.append(f'<rect x="{width*0.07:.2f}" y="{y:.2f}" width="{width*0.86:.2f}" height="{card_body_h:.2f}" rx="20" fill="#FFFFFF"/>')
+            cards.append(f'<rect x="{width*0.07:.2f}" y="{y:.2f}" width="{width*0.86:.2f}" height="{card_body_h:.2f}" rx="20" fill="{"#161D2A" if theme_dark else "#FFFFFF"}"/>')
             cards.append(f'<circle cx="{icon_cx:.2f}" cy="{y + card_body_h*0.28:.2f}" r="{width*0.022:.2f}" fill="{colors[idx % len(colors)]}"/>')
-            cards.append(_svg_text_block(title_x, title_y, name_lines, name_size, "#2A2F45", weight=900, line_gap=1.02))
-            cards.append(f'<rect x="{width*0.72:.2f}" y="{role_pill_y:.2f}" width="{width*0.14:.2f}" height="{height*0.028:.2f}" rx="{height*0.014:.2f}" fill="#EEF2FF"/>')
-            cards.append(_svg_text_block(width*0.79, role_pill_y + height*0.020, role_lines, role_size, "#6A73D8", weight=800, anchor="middle", line_gap=1.03))
-            cards.append(_svg_text_block(title_x, desc_y, desc_lines, desc_size, "#667089", weight=700, line_gap=1.05))
+            cards.append(_svg_text_block(title_x, title_y, name_lines, name_size, "#EFF3FF" if theme_dark else "#2A2F45", weight=900, line_gap=1.02))
+            cards.append(f'<rect x="{width*0.72:.2f}" y="{role_pill_y:.2f}" width="{width*0.14:.2f}" height="{height*0.028:.2f}" rx="{height*0.014:.2f}" fill="{"#1A2234" if theme_dark else "#EEF2FF"}"/>')
+            cards.append(_svg_text_block(width*0.79, role_pill_y + height*0.020, role_lines, role_size, accent if not theme_dark else "#BFD0FF", weight=800, anchor="middle", line_gap=1.03))
+            cards.append(_svg_text_block(title_x, desc_y, desc_lines, desc_size, "#A6B0C5" if theme_dark else "#667089", weight=700, line_gap=1.05))
         return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
-  <rect x="0" y="0" width="{width}" height="{height}" fill="#F5F6FC"/>
-  <rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.26:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="#EEF2FF"/>
-  {_svg_text_block(width*0.10, height*0.105, [copy["kicker"] or "工具速览"], max(14, int(width*0.017)), "#6B74D8", weight=800)}
-  {_svg_text_block(width*0.07, catalog_title_y, catalog_title_lines, catalog_title_size, "#243047", weight=900, line_gap=1.02)}
-  {_svg_text_block(width*0.07, catalog_subtitle_y, catalog_subtitle_lines, max(15, int(width*0.019)), "#7E869B", weight=700, line_gap=1.08)}
-  {f'<rect x="{width*0.07:.2f}" y="{catalog_badge_y:.2f}" width="{width*0.16:.2f}" height="{height*0.042:.2f}" rx="18" fill="#F2EEFF"/>{_svg_text_block(width*0.10, catalog_badge_y + height*0.028, [copy["emphasis"]], max(18, int(width*0.022)), "#7A59E6", weight=900)}' if copy["emphasis"] else ''}
+  <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0F1320" if theme_dark else "#F5F6FC"}"/>
+  {f'<rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.26:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="{"#1A2234" if theme_dark else "#EEF2FF"}"/>{_svg_text_block(width*0.10, height*0.105, [kicker_text], max(14, int(width*0.017)), accent if not theme_dark else "#BFD0FF", weight=800)}' if kicker_text else ''}
+  {_svg_text_block(width*0.07, catalog_title_y, catalog_title_lines, catalog_title_size, "#F4F7FF" if theme_dark else "#243047", weight=900, line_gap=1.02)}
+  {_svg_text_block(width*0.07, catalog_subtitle_y, catalog_subtitle_lines, max(15, int(width*0.019)), "#A6B0C5" if theme_dark else "#7E869B", weight=700, line_gap=1.08)}
+  {f'<rect x="{width*0.07:.2f}" y="{catalog_badge_y:.2f}" width="{width*0.16:.2f}" height="{height*0.042:.2f}" rx="18" fill="{"#1C2538" if theme_dark else "#F2EEFF"}"/>{_svg_text_block(width*0.10, catalog_badge_y + height*0.028, [copy["emphasis"]], max(18, int(width*0.022)), accent if not theme_dark else "#D3BEFF", weight=900)}' if copy["emphasis"] else ''}
   <g>{''.join(cards)}</g>
-  {_svg_text_block(width*0.50, height*0.95, ["主流产品定位、特点和适用场景"], max(14, int(width*0.018)), "#A7ADBF", weight=600, anchor="middle")}
+  {_svg_text_block(width*0.50, height*0.95, footer_lines, max(14, int(width*0.018)), "#8F99AF" if theme_dark else "#A7ADBF", weight=600, anchor="middle") if footer_lines else ''}
 </svg>'''
 
     if kind == "qa":
+        theme_dark = controls["theme"] == "dark"
+        accent = "#5B82F4" if controls["accent"] in {"auto", "blue"} else "#45B97C" if controls["accent"] == "green" else "#E67E22" if controls["accent"] == "warm" else "#D96DB4"
+        section_role = controls.get("section_role", "auto")
+        kicker_text = _visible_kicker(copy)
+        footer_lines = _footer_lines(copy)
         qa_items = bullets[:4] or ["问题定义：先说结论，再拆原因", "核心机制：把复杂概念拆成 3 个点", "关键数据：用数字做视觉锚点", "落地建议：最后给出行动结论"]
         cards: list[str] = []
-        qa_start_y = height * 0.27
+        qa_start_y = height * (0.29 if section_role == "summary" else 0.27)
         qa_gap = height * 0.035
         qa_card_h = (height - qa_start_y - height * 0.12 - qa_gap * (len(qa_items) - 1)) / max(1, len(qa_items))
         for idx, item in enumerate(qa_items):
@@ -1257,7 +2145,11 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
                 max_width_px=width * 0.60,
                 chinese_wraps=[18, 16, 14],
                 latin_wraps=[28, 24, 20],
-                size_candidates=[max(22, int(width*0.028)), max(20, int(width*0.026)), max(18, int(width*0.024))],
+                size_candidates=[
+                    max(24 if controls["density"] != "compact" else 22, int(width*0.030)),
+                    max(20, int(width*0.026)),
+                    max(18, int(width*0.024)),
+                ],
                 max_lines=2,
             )
             a_lines, a_size = ([], 0)
@@ -1267,37 +2159,48 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
                     max_width_px=width * 0.62,
                     chinese_wraps=[28, 24, 22],
                     latin_wraps=[42, 36, 32],
-                    size_candidates=[max(18, int(width*0.022)), max(16, int(width*0.020)), max(15, int(width*0.018))],
+                    size_candidates=[
+                        max(19 if controls["density"] == "comfy" else 18, int(width*0.023)),
+                        max(16, int(width*0.020)),
+                        max(15, int(width*0.018)),
+                    ],
                     max_lines=2,
                 )
-            cards.append(f'<rect x="{width*0.08:.2f}" y="{y:.2f}" width="{width*0.84:.2f}" height="{qa_card_h:.2f}" rx="22" fill="#FFFFFF"/>')
-            cards.append(f'<rect x="{width*0.10:.2f}" y="{y + qa_card_h*0.18:.2f}" width="{width*0.010:.2f}" height="{qa_card_h*0.48:.2f}" rx="8" fill="#D9DEFF"/>')
-            cards.append(f'<rect x="{width*0.77:.2f}" y="{y + qa_card_h*0.16:.2f}" width="{width*0.09:.2f}" height="{height*0.028:.2f}" rx="{height*0.014:.2f}" fill="#EEF2FF"/>')
-            cards.append(_svg_text_block(width*0.815, y + qa_card_h*0.16 + height*0.020, [f"Q{idx + 1}"], max(14, int(width*0.017)), "#6A73D8", weight=900, anchor="middle"))
-            cards.append(_svg_text_block(width*0.16, y + qa_card_h*0.34, q_lines, q_size, "#22263A", weight=900, line_gap=1.05))
+            cards.append(f'<rect x="{width*0.08:.2f}" y="{y:.2f}" width="{width*0.84:.2f}" height="{qa_card_h:.2f}" rx="22" fill="{"#161D2A" if theme_dark else "#FFFFFF"}"/>')
+            cards.append(f'<rect x="{width*0.10:.2f}" y="{y + qa_card_h*0.18:.2f}" width="{width*0.010:.2f}" height="{qa_card_h*0.48:.2f}" rx="8" fill="{accent if not theme_dark else "#2C4F7A"}"/>')
+            cards.append(f'<rect x="{width*0.77:.2f}" y="{y + qa_card_h*0.16:.2f}" width="{width*0.09:.2f}" height="{height*0.028:.2f}" rx="{height*0.014:.2f}" fill="{"#1A2234" if theme_dark else "#EEF2FF"}"/>')
+            cards.append(_svg_text_block(width*0.815, y + qa_card_h*0.16 + height*0.020, [f"Q{idx + 1}"], max(14, int(width*0.017)), accent if not theme_dark else "#BFD0FF", weight=900, anchor="middle"))
+            cards.append(_svg_text_block(width*0.16, y + qa_card_h*0.34, q_lines, q_size, "#F1F5FF" if theme_dark else "#22263A", weight=900, line_gap=1.05))
             if a_lines:
-                cards.append(_svg_text_block(width*0.16, y + qa_card_h*0.66, a_lines, a_size, "#7E869B", weight=700, line_gap=1.1))
+                cards.append(_svg_text_block(width*0.16, y + qa_card_h*0.66, a_lines, a_size, "#A6B0C5" if theme_dark else "#7E869B", weight=700, line_gap=1.1))
         return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
-  <rect x="0" y="0" width="{width}" height="{height}" fill="#F5F6FC"/>
-  <rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.24:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="#EEF2FF"/>
-  {_svg_text_block(width*0.10, height*0.105, [copy["kicker"] or "问答卡"], max(14, int(width*0.017)), "#6B74D8", weight=800)}
-  {_svg_text_block(width*0.08, height*0.17, title_lines, max(38, int(width*0.056)), "#243047", weight=900, line_gap=1.06)}
-  {_svg_text_block(width*0.08, height*0.24, subtitle_lines[:2], max(18, int(width*0.022)), "#7E869B", weight=700, line_gap=1.08)}
+  <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0F1320" if theme_dark else "#F5F6FC"}"/>
+  {f'<rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.24:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="{"#1A2234" if theme_dark else "#EEF2FF"}"/>{_svg_text_block(width*0.10, height*0.105, [kicker_text], max(14, int(width*0.017)), accent if not theme_dark else "#BFD0FF", weight=800)}' if kicker_text else ''}
+  {_svg_text_block(width*0.08, height*0.17, title_lines, max(38, int(width*0.056)), "#F4F7FF" if theme_dark else "#243047", weight=900, line_gap=1.06)}
+  {_svg_text_block(width*0.08, height*0.24, subtitle_lines[:2], max(18, int(width*0.022)), "#A6B0C5" if theme_dark else "#7E869B", weight=700, line_gap=1.08)}
   <g>{''.join(cards)}</g>
-  {_svg_text_block(width*0.50, height*0.94, ["问题拆清楚，图片就更有表达力"], max(14, int(width*0.018)), "#A7ADBF", weight=600, anchor="middle")}
+  {_svg_text_block(width*0.50, height*0.94, footer_lines, max(14, int(width*0.018)), "#8F99AF" if theme_dark else "#A7ADBF", weight=600, anchor="middle") if footer_lines else ''}
 </svg>'''
 
     if kind == "timeline":
+        theme_dark = controls["theme"] == "dark"
+        accent = "#5B82F4" if controls["accent"] in {"auto", "blue"} else "#45B97C" if controls["accent"] == "green" else "#E67E22" if controls["accent"] == "warm" else "#D96DB4"
+        series_unified = controls.get("series_style") == "unified"
+        section_role = controls.get("section_role", "auto")
+        kicker_text = _visible_kicker(copy)
         points = bullets[:5] or ["提出概念", "官方定名", "行业采用", "规模增长", "共识形成"]
         if not _timeline_supports_text(points):
             kind = "mechanism"
         else:
             nodes: list[str] = []
-            base_y = height * 0.36
+            timeline_title_size = max(38, int(width*0.056)) + (4 if section_role == "chapter" else 2 if section_role == "summary" else 0)
+            title_y = height * (0.16 if section_role == "chapter" else 0.18)
+            subtitle_y = title_y + _text_block_height(title_lines, timeline_title_size, 1.06) + (height * 0.03 if section_role == "chapter" else height * 0.026)
+            base_y = subtitle_y + _text_block_height(subtitle_lines[:2], max(18, int(width*0.022)), 1.08) + (height * 0.10 if series_unified else height * 0.08)
             spacing = width * 0.18
             start_x = width * 0.14
-            nodes.append(f'<path d="M {start_x:.2f} {base_y:.2f} L {start_x + spacing*(len(points)-1):.2f} {base_y:.2f}" stroke="#C9D0EA" stroke-width="4" stroke-linecap="round"/>')
-            colors = ["#6F67DE", "#F06AB2", "#35C5F2", "#43E39B", "#FFB84D"]
+            nodes.append(f'<path d="M {start_x:.2f} {base_y:.2f} L {start_x + spacing*(len(points)-1):.2f} {base_y:.2f}" stroke="{"#34415A" if theme_dark else "#C9D0EA"}" stroke-width="4" stroke-linecap="round"/>')
+            colors = [accent, "#F06AB2", "#35C5F2", "#43E39B", "#FFB84D"]
             for idx, item in enumerate(points):
                 x = start_x + spacing * idx
                 point_lines, point_size = _fit_body_block(
@@ -1305,28 +2208,39 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
                     max_width_px=width * 0.18,
                     chinese_wraps=[10, 8, 7],
                     latin_wraps=[14, 12, 10],
-                    size_candidates=[max(18, int(width*0.022)), max(16, int(width*0.020)), max(14, int(width*0.018))],
+                    size_candidates=[
+                        max(19 if controls["density"] == "comfy" else 18, int(width*0.023)),
+                        max(16, int(width*0.020)),
+                        max(14, int(width*0.018)),
+                    ],
                     max_lines=2,
                 )
                 nodes.append(f'<circle cx="{x:.2f}" cy="{base_y:.2f}" r="{width*0.028:.2f}" fill="{colors[idx % len(colors)]}"/>')
-                nodes.append(_svg_text_block(x, base_y + height*0.11, point_lines, point_size, "#394156", weight=800, anchor="middle", line_gap=1.08))
+                nodes.append(_svg_text_block(x, base_y + height*0.11, point_lines, point_size, "#E8EEFF" if theme_dark else "#394156", weight=800, anchor="middle", line_gap=1.08))
             return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
-  <rect x="0" y="0" width="{width}" height="{height}" fill="#F5F6FC"/>
-  <rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.20:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="#EEF2FF"/>
-  {_svg_text_block(width*0.10, height*0.105, [copy["kicker"] or "时间线"], max(14, int(width*0.017)), "#6B74D8", weight=800)}
-  {_svg_text_block(width*0.08, height*0.18, title_lines, max(38, int(width*0.056)), "#243047", weight=900, line_gap=1.06)}
-  {_svg_text_block(width*0.08, height*0.26, subtitle_lines[:2], max(18, int(width*0.022)), "#7E869B", weight=700, line_gap=1.08)}
+  <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0F1320" if theme_dark else "#F5F6FC"}"/>
+  {f'<rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.20:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="{"#1A2234" if theme_dark else "#EEF2FF"}"/>{_svg_text_block(width*0.10, height*0.105, [kicker_text], max(14, int(width*0.017)), accent if not theme_dark else "#BFD0FF", weight=800)}' if kicker_text else ''}
+  {_svg_text_block(width*0.08, title_y, title_lines, timeline_title_size, "#F4F7FF" if theme_dark else "#243047", weight=900, line_gap=1.06)}
+  {_svg_text_block(width*0.08, subtitle_y, subtitle_lines[:2], max(18, int(width*0.022)), "#A6B0C5" if theme_dark else "#7E869B", weight=700, line_gap=1.08)}
   <g>{''.join(nodes)}</g>
-  {f'<rect x="{width*0.08:.2f}" y="{height*0.68:.2f}" width="{width*0.84:.2f}" height="{height*0.14:.2f}" rx="24" fill="#FFFFFF"/>{_svg_text_block(width*0.12, height*0.73, _wrap_text(copy["emphasis"], 12), max(24, int(width*0.032)), "#7A59E6", weight=900)}{_svg_text_block(width*0.28, height*0.73, subtitle_lines[:2], max(18, int(width*0.022)), "#7E869B", weight=700, line_gap=1.08)}' if copy["emphasis"] else ''}
+  {f'<rect x="{width*0.08:.2f}" y="{height*0.68:.2f}" width="{width*0.84:.2f}" height="{height*0.14:.2f}" rx="24" fill="{"#171F2D" if theme_dark else "#FFFFFF"}"/>{_svg_text_block(width*0.12, height*0.73, _wrap_text(copy["emphasis"], 12), max(24, int(width*0.032)), accent if not theme_dark else "#D3BEFF", weight=900)}{_svg_text_block(width*0.28, height*0.73, subtitle_lines[:2], max(18, int(width*0.022)), "#A6B0C5" if theme_dark else "#7E869B", weight=700, line_gap=1.08)}' if copy["emphasis"] else ''}
 </svg>'''
 
     if kind == "comparison":
+        theme_dark = controls["theme"] == "dark"
+        accent = "#5B82F4" if controls["accent"] in {"auto", "blue"} else "#45B97C" if controls["accent"] == "green" else "#E67E22" if controls["accent"] == "warm" else "#D96DB4"
+        series_unified = controls.get("series_style") == "unified"
+        section_role = controls.get("section_role", "auto")
+        kicker_text = _visible_kicker(copy)
+        footer_lines = _footer_lines(copy)
         rows = bullets[:5] or ["以前：手动整理", "现在：自动筛选", "以前：逐条处理", "现在：结果直达"]
         comparison_title_lines = title_lines
-        title_y = height * 0.17
-        subtitle_y = title_y + _text_block_height(comparison_title_lines, title_size, 1.04) + height * 0.02
-        header_bar_y = subtitle_y + _text_block_height(subtitle_lines[:2], subtitle_size, 1.08) + height * 0.03
-        row_h, row_gap = _tight_row_metrics(height, header_bar_y + height * 0.07, height * 0.11, len(rows))
+        comparison_title_size = title_size + (4 if section_role == "chapter" else 2 if section_role == "summary" else 0)
+        title_y = height * (0.155 if section_role == "chapter" else 0.17)
+        subtitle_y = title_y + _text_block_height(comparison_title_lines, comparison_title_size, 1.04) + (height * 0.024 if series_unified else height * 0.02)
+        header_bar_y = subtitle_y + _text_block_height(subtitle_lines[:2], subtitle_size, 1.08) + (height * 0.034 if section_role == "chapter" else height * 0.03)
+        min_row_h = height * (0.10 if controls["density"] == "compact" else 0.12 if controls["density"] == "comfy" else 0.11)
+        row_h, row_gap = _tight_row_metrics(height, header_bar_y + height * 0.07, min_row_h, len(rows))
         body: list[str] = []
         start_y = header_bar_y + height * 0.08
         for idx, row in enumerate(rows):
@@ -1337,7 +2251,11 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
                 max_width_px=width * 0.22,
                 chinese_wraps=[14, 12, 10],
                 latin_wraps=[18, 16, 14],
-                size_candidates=[max(20, int(width*0.024)), max(18, int(width*0.022)), max(16, int(width*0.020))],
+                size_candidates=[
+                    max(21 if controls["density"] != "compact" else 20, int(width*0.025)),
+                    max(18, int(width*0.022)),
+                    max(16, int(width*0.020)),
+                ],
                 max_lines=2,
             )
             before_lines, before_size = _fit_body_block(
@@ -1345,7 +2263,11 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
                 max_width_px=width * 0.22,
                 chinese_wraps=[16, 14, 12],
                 latin_wraps=[22, 20, 18],
-                size_candidates=[max(18, int(width*0.021)), max(16, int(width*0.019)), max(15, int(width*0.018))],
+                size_candidates=[
+                    max(19 if controls["density"] == "comfy" else 18, int(width*0.022)),
+                    max(16, int(width*0.019)),
+                    max(15, int(width*0.018)),
+                ],
                 max_lines=2,
             )
             after_lines, after_size = _fit_body_block(
@@ -1353,92 +2275,141 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
                 max_width_px=width * 0.22,
                 chinese_wraps=[16, 14, 12],
                 latin_wraps=[22, 20, 18],
-                size_candidates=[max(18, int(width*0.021)), max(16, int(width*0.019)), max(15, int(width*0.018))],
+                size_candidates=[
+                    max(19 if controls["density"] == "comfy" else 18, int(width*0.022)),
+                    max(16, int(width*0.019)),
+                    max(15, int(width*0.018)),
+                ],
                 max_lines=2,
             )
-            body.append(f'<rect x="{width*0.07:.2f}" y="{y:.2f}" width="{width*0.86:.2f}" height="{row_h*0.86:.2f}" rx="18" fill="#FFFFFF" fill-opacity="0.82"/>')
-            body.append(_svg_text_block(width*0.10, y + row_h*0.30, scene_lines, scene_size, "#2A2F45", weight=800, line_gap=1.08))
-            body.append(_svg_text_block(width*0.34, y + row_h*0.25, before_lines, before_size, "#41485F", weight=700, line_gap=1.08))
-            body.append(_svg_text_block(width*0.62, y + row_h*0.25, after_lines, after_size, "#657DE8", weight=800, line_gap=1.08))
+            body.append(f'<rect x="{width*0.07:.2f}" y="{y:.2f}" width="{width*0.86:.2f}" height="{row_h*0.86:.2f}" rx="18" fill="{"#171F2D" if theme_dark else "#FFFFFF"}" fill-opacity="0.92"/>')
+            body.append(_svg_text_block(width*0.10, y + row_h*0.30, scene_lines, scene_size, "#EFF3FF" if theme_dark else "#2A2F45", weight=800, line_gap=1.08))
+            body.append(_svg_text_block(width*0.34, y + row_h*0.25, before_lines, before_size, "#A6B0C5" if theme_dark else "#41485F", weight=700, line_gap=1.08))
+            body.append(_svg_text_block(width*0.62, y + row_h*0.25, after_lines, after_size, accent if not theme_dark else "#BFD0FF", weight=800, line_gap=1.08))
         return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
-  <rect x="0" y="0" width="{width}" height="{height}" fill="#F5F6FC"/>
+  <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0F1320" if theme_dark else "#F5F6FC"}"/>
   <rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.86:.2f}" height="{height*0.035:.2f}" rx="{height*0.017:.2f}" fill="url(#bar)"/>
   <defs>
     <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#5B82F4"/>
-      <stop offset="100%" stop-color="#8B4DB4"/>
+      <stop offset="0%" stop-color="{accent}"/>
+      <stop offset="100%" stop-color="{"#8B4DB4" if accent != "#D96DB4" else "#5B82F4"}"/>
     </linearGradient>
   </defs>
-  {_svg_text_block(width*0.09, height*0.105, [copy["kicker"] or "前后对比"], max(14, int(width*0.017)), "#FFFFFF", weight=800)}
-  {_svg_text_block(width*0.07, title_y, comparison_title_lines, title_size, "#5B6AD6", weight=900, line_gap=1.04)}
-  {_svg_text_block(width*0.07, subtitle_y, subtitle_lines[:2], subtitle_size, "#7E869B", weight=700, line_gap=1.08)}
-  <rect x="{width*0.07:.2f}" y="{header_bar_y:.2f}" width="{width*0.86:.2f}" height="{height*0.055:.2f}" rx="18" fill="#7C63D8"/>
+  {_svg_text_block(width*0.09, height*0.105, [kicker_text], max(14, int(width*0.017)), "#FFFFFF", weight=800) if kicker_text else ''}
+  {_svg_text_block(width*0.07, title_y, comparison_title_lines, comparison_title_size, accent if not theme_dark else "#BFD0FF", weight=900, line_gap=1.04)}
+  {_svg_text_block(width*0.07, subtitle_y, subtitle_lines[:2], subtitle_size, "#A6B0C5" if theme_dark else "#7E869B", weight=700, line_gap=1.08)}
+  <rect x="{width*0.07:.2f}" y="{header_bar_y:.2f}" width="{width*0.86:.2f}" height="{height*0.055:.2f}" rx="18" fill="{"#25314A" if theme_dark else "#7C63D8"}"/>
   {_svg_text_block(width*0.10, header_bar_y + height*0.035, ["场景"], max(17, int(width*0.021)), "#FFFFFF", weight=800)}
   {_svg_text_block(width*0.34, header_bar_y + height*0.035, ["以前"], max(17, int(width*0.021)), "#FFFFFF", weight=800)}
   {_svg_text_block(width*0.62, header_bar_y + height*0.035, ["现在"], max(17, int(width*0.021)), "#FFFFFF", weight=800)}
   <g>{''.join(body)}</g>
-  {_svg_text_block(width*0.50, height*0.94, [copy["subtitle"]], max(14, int(width*0.018)), "#9AA0B5", weight=600, anchor="middle")}
+  {_svg_text_block(width*0.50, height*0.94, footer_lines, max(14, int(width*0.018)), "#8F99AF" if theme_dark else "#9AA0B5", weight=600, anchor="middle") if footer_lines else ''}
 </svg>'''
 
     if kind == "flow":
+        theme_dark = controls["theme"] == "dark"
+        accent = "#5B82F4" if controls["accent"] in {"auto", "blue"} else "#45B97C" if controls["accent"] == "green" else "#E67E22" if controls["accent"] == "warm" else "#D96DB4"
+        series_unified = controls.get("series_style") == "unified"
+        section_role = controls.get("section_role", "auto")
+        kicker_text = _visible_kicker(copy)
+        footer_lines = _footer_lines(copy)
         steps = bullets[:5] or ["写完文章", "Agent 唤醒", "自动翻译", "推送发布", "状态更新"]
-        step_h = height * 0.11
         nodes: list[str] = []
         arrows: list[str] = []
-        for idx, step in enumerate(steps):
-            y = height * 0.24 + idx * step_h
-            circle_colors = ["#6F67DE", "#F06AB2", "#35C5F2", "#43E39B", "#FFB84D"]
+        circle_colors = [accent, "#F06AB2", "#35C5F2", "#43E39B", "#FFB84D"]
+        flow_specs: list[tuple[list[str], int, list[str], int, float]] = []
+        min_step_h = height * (0.105 if controls["density"] == "compact" else 0.118 if controls["density"] == "comfy" else 0.11)
+        flow_title_size = max(38, int(width*0.056)) + (4 if section_role == "chapter" else 2 if section_role == "summary" else 0)
+        title_y = height * (0.09 if section_role == "chapter" else 0.10)
+        subtitle_y = title_y + _text_block_height([copy["title"]], flow_title_size, 1.0) + (height * 0.028 if section_role == "chapter" else height * 0.022)
+        content_top = subtitle_y + _text_block_height(subtitle_lines, max(18, int(width*0.022)), 1.08) + (height * 0.045 if series_unified else height * 0.04)
+        available_h = height - content_top - height * 0.12
+        for step in steps:
             title, desc = _split_bullet_copy(step)
             flow_title_lines, flow_title_size = _fit_body_block(
                 title,
-                max_width_px=width * 0.52,
-                chinese_wraps=[18, 16, 14],
-                latin_wraps=[28, 24, 20],
-                size_candidates=[max(22, int(width*0.030)), max(20, int(width*0.027)), max(18, int(width*0.024))],
+                max_width_px=width * 0.57,
+                chinese_wraps=[20, 18, 16],
+                latin_wraps=[32, 28, 24],
+                size_candidates=[
+                    max(24 if controls["density"] != "compact" else 22, int(width*0.032)),
+                    max(20, int(width*0.027)),
+                    max(18, int(width*0.024)),
+                ],
                 max_lines=2,
             )
             flow_desc_lines, flow_desc_size = _fit_body_block(
                 desc,
-                max_width_px=width * 0.52,
-                chinese_wraps=[24, 22, 18],
-                latin_wraps=[36, 32, 28],
-                size_candidates=[max(18, int(width*0.022)), max(16, int(width*0.020)), max(15, int(width*0.018))],
+                max_width_px=width * 0.57,
+                chinese_wraps=[28, 24, 22],
+                latin_wraps=[42, 36, 32],
+                size_candidates=[
+                    max(19 if controls["density"] == "comfy" else 18, int(width*0.023)),
+                    max(16, int(width*0.020)),
+                    max(15, int(width*0.018)),
+                ],
                 max_lines=2,
             )
-            nodes.append(f'<rect x="{width*0.12:.2f}" y="{y:.2f}" width="{width*0.78:.2f}" height="{step_h*0.72:.2f}" rx="22" fill="#FFFFFF"/>')
-            nodes.append(f'<circle cx="{width*0.17:.2f}" cy="{y + step_h*0.36:.2f}" r="{width*0.038:.2f}" fill="{circle_colors[idx % len(circle_colors)]}"/>')
-            nodes.append(_svg_text_block(width*0.17, y + step_h*0.39, [str(idx + 1)], max(18, int(width*0.022)), "#FFFFFF", weight=900, anchor="middle"))
-            nodes.append(_svg_text_block(width*0.25, y + step_h*0.30, flow_title_lines, flow_title_size, "#22263A", weight=800))
-            nodes.append(_svg_text_block(width*0.25, y + step_h*0.53, flow_desc_lines, flow_desc_size, "#8A90A8", weight=700, line_gap=1.1))
-            if idx < len(steps) - 1:
-                arrows.append(f'<path d="M {width*0.50:.2f} {y + step_h*0.73:.2f} L {width*0.50:.2f} {y + step_h*0.94:.2f}" stroke="#CBD2EA" stroke-width="3" stroke-linecap="round"/>')
-                arrows.append(_svg_text_block(width*0.50, y + step_h*0.95, ["↓"], max(18, int(width*0.024)), "#B9BED2", weight=700, anchor="middle"))
+            title_h = _text_block_height(flow_title_lines, flow_title_size, 1.06)
+            desc_h = _text_block_height(flow_desc_lines, flow_desc_size, 1.10)
+            card_h = max(min_step_h * 0.72, height * 0.036 + title_h + desc_h + height * 0.040)
+            flow_specs.append((flow_title_lines, flow_title_size, flow_desc_lines, flow_desc_size, card_h))
+        total_cards_h = sum(spec[4] for spec in flow_specs)
+        arrow_gap = height * 0.028
+        total_needed = total_cards_h + arrow_gap * max(0, len(flow_specs) - 1)
+        if total_needed > available_h and total_needed > 0:
+            scale = available_h / total_needed
+            resized_specs: list[tuple[list[str], int, list[str], int, float]] = []
+            for flow_title_lines, flow_title_size, flow_desc_lines, flow_desc_size, card_h in flow_specs:
+                resized_specs.append((flow_title_lines, flow_title_size, flow_desc_lines, flow_desc_size, card_h * scale))
+            flow_specs = resized_specs
+            arrow_gap *= scale
+        current_y = content_top
+        for idx, (flow_title_lines, flow_title_size, flow_desc_lines, flow_desc_size, card_h) in enumerate(flow_specs):
+            y = current_y
+            current_y += card_h + arrow_gap
+            nodes.append(f'<rect x="{width*0.12:.2f}" y="{y:.2f}" width="{width*0.78:.2f}" height="{card_h:.2f}" rx="22" fill="{"#161D2A" if theme_dark else "#FFFFFF"}"/>')
+            nodes.append(f'<circle cx="{width*0.17:.2f}" cy="{y + card_h*0.36:.2f}" r="{width*0.038:.2f}" fill="{circle_colors[idx % len(circle_colors)]}"/>')
+            nodes.append(_svg_text_block(width*0.17, y + card_h*0.39, [str(idx + 1)], max(18, int(width*0.022)), "#FFFFFF", weight=900, anchor="middle"))
+            title_y = y + max(height * 0.022, card_h * 0.18)
+            desc_y = title_y + _text_block_height(flow_title_lines, flow_title_size, 1.06) + max(height * 0.012, card_h * 0.10)
+            nodes.append(_svg_text_block(width*0.25, title_y, flow_title_lines, flow_title_size, "#F1F5FF" if theme_dark else "#22263A", weight=800, line_gap=1.06))
+            nodes.append(_svg_text_block(width*0.25, desc_y, flow_desc_lines, flow_desc_size, "#A6B0C5" if theme_dark else "#8A90A8", weight=700, line_gap=1.1))
+            if idx < len(flow_specs) - 1:
+                arrow_top = y + card_h
+                arrow_bottom = arrow_top + arrow_gap * 0.72
+                arrows.append(f'<path d="M {width*0.50:.2f} {arrow_top:.2f} L {width*0.50:.2f} {arrow_bottom:.2f}" stroke="{"#3A465E" if theme_dark else "#CBD2EA"}" stroke-width="3" stroke-linecap="round"/>')
+                arrows.append(_svg_text_block(width*0.50, arrow_bottom + height*0.008, ["↓"], max(18, int(width*0.024)), "#8F99AF" if theme_dark else "#B9BED2", weight=700, anchor="middle"))
         return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
-  <rect x="0" y="0" width="{width}" height="{height}" fill="#F5F6FC"/>
-  <rect x="{width*0.07:.2f}" y="{height*0.075:.2f}" width="{width*0.54:.2f}" height="{height*0.04:.2f}" rx="{height*0.02:.2f}" fill="#E6EBFF"/>
-  {_svg_text_block(width*0.10, height*0.103, [copy["kicker"] or "自动流程"], max(14, int(width*0.017)), "#6A73D8", weight=800)}
-  {_svg_text_block(width*0.07, height*0.10, [copy["title"]], max(38, int(width*0.056)), "#29304C", weight=900)}
-  {_svg_text_block(width*0.07, height*0.155, subtitle_lines, max(18, int(width*0.022)), "#8A90A8", weight=700, line_gap=1.08)}
+  <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0F1320" if theme_dark else "#F5F6FC"}"/>
+  {f'<rect x="{width*0.07:.2f}" y="{height*0.075:.2f}" width="{width*0.54:.2f}" height="{height*0.04:.2f}" rx="{height*0.02:.2f}" fill="{"#1A2234" if theme_dark else "#E6EBFF"}"/>{_svg_text_block(width*0.10, height*0.103, [kicker_text], max(14, int(width*0.017)), accent if not theme_dark else "#BFD0FF", weight=800)}' if kicker_text else ''}
+  {_svg_text_block(width*0.07, title_y, [copy["title"]], flow_title_size, "#F4F7FF" if theme_dark else "#29304C", weight=900)}
+  {_svg_text_block(width*0.07, subtitle_y, subtitle_lines, max(18, int(width*0.022)), "#A6B0C5" if theme_dark else "#8A90A8", weight=700, line_gap=1.08)}
   <g>{''.join(nodes)}</g>
   <g>{''.join(arrows)}</g>
-  {_svg_text_block(width*0.50, height*0.95, ["发财 · AI效率干货 · 收藏备用"], max(14, int(width*0.018)), "#A7ADBF", weight=600, anchor="middle")}
+  {_svg_text_block(width*0.50, height*0.95, footer_lines, max(14, int(width*0.018)), "#8F99AF" if theme_dark else "#A7ADBF", weight=600, anchor="middle") if footer_lines else ''}
 </svg>'''
 
     cards: list[str] = []
-    mechanism_items = bullets[:3] or ["读到结构快照", "页面可持续读取", "同一任务链保留上下文"]
+    theme_dark = controls["theme"] == "dark"
+    accent = "#5B82F4" if controls["accent"] in {"auto", "blue"} else "#45B97C" if controls["accent"] == "green" else "#E67E22" if controls["accent"] == "warm" else "#D96DB4"
+    series_unified = controls.get("series_style") == "unified"
+    section_role = controls.get("section_role", "auto")
+    mechanism_items = bullets[:4] or ["读到结构快照", "页面可持续读取", "同一任务链保留上下文", "关键信息分层呈现"]
     mechanism_subtitle_lines = subtitle_lines[:2]
-    title_y = height * 0.17
-    subtitle_y = title_y + _text_block_height(title_lines, title_size, 1.08) + height * 0.02
-    badge_y = subtitle_y + _text_block_height(mechanism_subtitle_lines, subtitle_size, 1.08) + height * 0.028
-    footer_lines = ["收藏备用，下次直接照着做"]
+    title_y = height * (0.155 if section_role == "chapter" else 0.17)
+    subtitle_y = title_y + _text_block_height(title_lines, title_size, 1.08) + (height * 0.024 if series_unified else height * 0.02)
+    badge_y = subtitle_y + _text_block_height(mechanism_subtitle_lines, subtitle_size, 1.08) + (height * 0.034 if section_role == "chapter" else height * 0.028)
+    kicker_text = _visible_kicker(copy)
+    footer_lines = _footer_lines(copy)
     footer_size = max(15, int(width * 0.02))
     footer_h = _text_block_height(footer_lines, footer_size, 1.08)
-    footer_reserved = max(height * 0.11, footer_h + height * 0.08)
-    card_h, card_gap = _tight_row_metrics(height, badge_y + height * 0.05, footer_reserved, len(mechanism_items))
-    cards_start_y = badge_y + height * 0.06
+    footer_reserved = max(height * 0.05, footer_h + height * 0.08) if footer_lines else height * 0.05
+    card_h, card_gap = _tight_row_metrics(height, badge_y + height * 0.054, footer_reserved, len(mechanism_items))
+    cards_start_y = badge_y + height * 0.068
     last_card_bottom = cards_start_y + len(mechanism_items) * card_h + max(0, len(mechanism_items) - 1) * card_gap
     footer_y = min(height * 0.93, last_card_bottom + height * 0.05)
-    colors = ["#5B82F4", "#E284F1", "#4AA6F0"]
+    colors = [accent, "#E284F1" if not theme_dark else "#D96DB4", "#4AA6F0" if not theme_dark else "#7AA2FF", "#45B97C" if not theme_dark else "#66D39E"]
     for idx, item in enumerate(mechanism_items):
         y = cards_start_y + idx * (card_h + card_gap)
         item_lines, item_size = _fit_body_block(
@@ -1449,22 +2420,21 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
             size_candidates=[max(24, int(width*0.030)), max(22, int(width*0.028)), max(20, int(width*0.026))],
             max_lines=2,
         )
-        cards.append(f'<rect x="{width*0.08:.2f}" y="{y:.2f}" width="{width*0.84:.2f}" height="{card_h:.2f}" rx="20" fill="#FFFFFF"/>')
+        cards.append(f'<rect x="{width*0.08:.2f}" y="{y:.2f}" width="{width*0.84:.2f}" height="{card_h:.2f}" rx="20" fill="{"#161C29" if theme_dark else "#FFFFFF"}"/>')
         cards.append(f'<rect x="{width*0.10:.2f}" y="{y + card_h*0.18:.2f}" width="{width*0.010:.2f}" height="{card_h*0.56:.2f}" rx="6" fill="{colors[idx % len(colors)]}"/>')
-        cards.append(f'<rect x="{width*0.76:.2f}" y="{y + card_h*0.16:.2f}" width="{width*0.10:.2f}" height="{height*0.028:.2f}" rx="{height*0.014:.2f}" fill="#EEF2FF"/>')
-        cards.append(_svg_text_block(width*0.81, y + card_h*0.16 + height*0.020, [f"要点{idx + 1}"], max(14, int(width*0.017)), "#6A73D8", weight=800, anchor="middle"))
-        cards.append(_svg_text_block(width*0.16, y + card_h*0.40, item_lines, item_size, "#394156", weight=800, line_gap=1.08))
+        cards.append(f'<rect x="{width*0.76:.2f}" y="{y + card_h*0.16:.2f}" width="{width*0.10:.2f}" height="{height*0.028:.2f}" rx="{height*0.014:.2f}" fill="{"#273147" if theme_dark else "#EEF2FF"}"/>')
+        cards.append(_svg_text_block(width*0.81, y + card_h*0.16 + height*0.020, [f"要点{idx + 1}"], max(14, int(width*0.017)), accent if theme_dark else "#6A73D8", weight=800, anchor="middle"))
+        cards.append(_svg_text_block(width*0.16, y + card_h*0.40, item_lines, item_size, "#EEF3FF" if theme_dark else "#394156", weight=800, line_gap=1.08))
         if idx < len(mechanism_items) - 1:
-            cards.append(f'<path d="M {width*0.10:.2f} {y + card_h + card_gap*0.38:.2f} L {width*0.92:.2f} {y + card_h + card_gap*0.38:.2f}" stroke="#EEF1F6" stroke-width="2"/>')
+            cards.append(f'<path d="M {width*0.10:.2f} {y + card_h + card_gap*0.38:.2f} L {width*0.92:.2f} {y + card_h + card_gap*0.38:.2f}" stroke="{"#232D40" if theme_dark else "#EEF1F6"}" stroke-width="2"/>')
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
-  <rect x="0" y="0" width="{width}" height="{height}" fill="#F5F6FC"/>
-  <rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.22:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="#EEF2FF"/>
-  {_svg_text_block(width*0.10, height*0.105, [copy["kicker"] or "机制卡"], max(14, int(width*0.017)), "#6B74D8", weight=800)}
-  {_svg_text_block(width*0.08, title_y, title_lines, title_size, "#253044", weight=900, line_gap=1.08)}
-  {_svg_text_block(width*0.08, subtitle_y, mechanism_subtitle_lines, subtitle_size, "#7E869B", weight=700, line_gap=1.08)}
-  {f'<rect x="{width*0.08:.2f}" y="{badge_y:.2f}" width="{width*0.22:.2f}" height="{height*0.042:.2f}" rx="{height*0.02:.2f}" fill="#F2EEFF"/>{_svg_text_block(width*0.11, badge_y + height*0.028, [copy["emphasis"]], max(18, int(width*0.022)), "#7A59E6", weight=900)}' if copy["emphasis"] else ''}
+  <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0E1320" if theme_dark else "#F5F6FC"}"/>
+  {f'<rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.22:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="{"#222B40" if theme_dark else "#EEF2FF"}"/>{_svg_text_block(width*0.10, height*0.105, [kicker_text], max(14, int(width*0.017)), accent if theme_dark else "#6B74D8", weight=800)}' if kicker_text else ''}
+  {_svg_text_block(width*0.08, title_y, title_lines, title_size, "#F2F6FF" if theme_dark else "#253044", weight=900, line_gap=1.08)}
+  {_svg_text_block(width*0.08, subtitle_y, mechanism_subtitle_lines, subtitle_size, "#B7C0D5" if theme_dark else "#7E869B", weight=700, line_gap=1.08)}
+  {f'<rect x="{width*0.08:.2f}" y="{badge_y:.2f}" width="{width*0.22:.2f}" height="{height*0.042:.2f}" rx="{height*0.02:.2f}" fill="{"#2B2540" if theme_dark else "#F2EEFF"}"/>{_svg_text_block(width*0.11, badge_y + height*0.028, [copy["emphasis"]], max(18, int(width*0.022)), accent if theme_dark else "#7A59E6", weight=900)}' if copy["emphasis"] else ''}
   <g>{''.join(cards)}</g>
-  {_svg_text_block(width*0.50, footer_y, footer_lines, footer_size, "#7E869B", weight=700, anchor="middle")}
+  {_svg_text_block(width*0.50, footer_y, footer_lines, footer_size, "#9EABC3" if theme_dark else "#7E869B", weight=700, anchor="middle") if footer_lines else ''}
 </svg>'''
 
 
@@ -1556,6 +2526,23 @@ def _compose_svg(prompt: str, width: int, height: int) -> str:
     if _is_cover_prompt(prompt):
         return _compose_cover_svg(prompt, width, height)
     return _compose_illustration_svg(prompt, width, height)
+
+
+def _append_render_controls(prompt: str, theme: str, density: str, surface_style: str, accent: str, series_style: str = "auto", section_role: str = "auto") -> str:
+    parts = [prompt]
+    if theme and theme != "auto":
+        parts.append(f"主题：{theme}")
+    if density and density != "auto":
+        parts.append(f"页面密度：{density}")
+    if series_style and series_style != "auto":
+        parts.append(f"系列风格：{series_style}")
+    if section_role and section_role != "auto":
+        parts.append(f"页面角色：{section_role}")
+    if surface_style and surface_style != "auto":
+        parts.append(f"页面风格：{surface_style}")
+    if accent and accent != "auto":
+        parts.append(f"强调色：{accent}")
+    return "\n".join(parts)
 
 
 def export_svg_to_png(svg_path: Path, png_path: Path, width: int, height: int) -> None:
@@ -1715,6 +2702,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Local free text-to-image by SVG then PNG")
     parser.add_argument("--prompt", help="Text prompt")
     parser.add_argument("--prompt-file", help="Read prompt/article text from local file")
+    parser.add_argument("--story-plan-file", help="Read an agent-authored story plan JSON and render pages from it")
     parser.add_argument("--output", help="Output PNG path")
     parser.add_argument("--svg-output", help="Output SVG path (optional)")
     parser.add_argument("--width", type=int, default=1024)
@@ -1722,12 +2710,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--openclaw-project", help="Generate assets/thumbnail+icon for OpenClaw project")
     parser.add_argument("--story-output-dir", help="Generate a multi-image article story set into this directory")
     parser.add_argument("--story-strategy", choices=["auto", "story", "dense", "visual"], default="auto", help="Story strategy for article-to-image sets")
+    parser.add_argument("--story-image", action="append", default=[], help="Attach a real image to article story pages; repeatable")
+    parser.add_argument("--theme", choices=["auto", "light", "dark"], default="auto", help="Overall image theme")
+    parser.add_argument("--page-density", choices=["auto", "comfy", "compact"], default="auto", help="Text spacing density")
+    parser.add_argument("--series-style", choices=["auto", "loose", "unified"], default="auto", help="How strongly pages in a set should feel like one series")
+    parser.add_argument("--section-role", choices=["auto", "cover", "chapter", "body", "summary"], default="auto", help="Page role hint for this render")
+    parser.add_argument("--surface-style", choices=["auto", "soft", "card", "minimal", "editorial"], default="auto", help="Overall surface style hint")
+    parser.add_argument("--accent", choices=["auto", "blue", "green", "warm", "rose"], default="auto", help="Accent color family")
     parser.add_argument("--outline-only", action="store_true", help="Write analysis and outline only")
     parser.add_argument("--prompts-only", action="store_true", help="Write analysis, outline, and prompt files only")
     parser.add_argument("--images-only", action="store_true", help="Generate images using existing or regenerated prompt files")
     args = parser.parse_args(argv)
-    if not args.prompt and not args.prompt_file:
-        parser.error("one of --prompt or --prompt-file is required")
+    if not args.prompt and not args.prompt_file and not args.story_plan_file:
+        parser.error("one of --prompt, --prompt-file, or --story-plan-file is required")
     return args
 
 
@@ -1736,6 +2731,21 @@ def main(argv: list[str] | None = None) -> int:
     prompt = args.prompt
     if args.prompt_file:
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8")
+    story_plan = None
+    if args.story_plan_file:
+        story_plan = json.loads(Path(args.story_plan_file).expanduser().read_text(encoding="utf-8"))
+        if prompt is None:
+            prompt = story_plan.get("title", "Agent story plan")
+    if prompt is not None:
+        prompt = _append_render_controls(
+            prompt,
+            args.theme,
+            args.page_density,
+            args.surface_style,
+            args.accent,
+            args.series_style,
+            args.section_role,
+        )
 
     try:
         if args.openclaw_project:
@@ -1748,7 +2758,7 @@ def main(argv: list[str] | None = None) -> int:
                 story_mode = "prompts-only"
             elif args.images_only:
                 story_mode = "images-only"
-            result = generate_article_story(prompt, args.story_output_dir, args.width, args.height, strategy=args.story_strategy, mode=story_mode)
+            result = generate_article_story(prompt, args.story_output_dir, args.width, args.height, strategy=args.story_strategy, mode=story_mode, story_images=args.story_image, story_plan=story_plan)
         else:
             output = args.output
             if not output:

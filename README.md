@@ -94,6 +94,20 @@ It also writes:
 
 So the workflow is inspectable and reusable instead of being a one-shot black box.
 
+### 3.5 Agent-Planned Story Rendering
+
+This is now the recommended workflow when you already have an agent that can read the article well.
+
+Instead of forcing the renderer to guess every page break and layout, let the agent decide:
+
+- how many pages to make
+- which paragraphs belong together
+- which pages should stay as article-style prose
+- which pages should become `mechanism`, `qa`, `checklist`, `catalog`, `comparison`, `map`, `flow`, or `timeline`
+- which pages should use light or dark styling
+
+Then render that plan directly with `--story-plan-file`.
+
 ### 4. OpenClaw Assets
 
 It can generate:
@@ -211,6 +225,16 @@ Available story strategies:
 - `dense`
 - `visual`
 
+### Render from an agent-authored story plan
+
+```bash
+python3 scripts/free_image_gen.py \
+  --story-plan-file /absolute/path/story-plan.json \
+  --story-output-dir /absolute/path/output/article-story \
+  --width 1080 \
+  --height 1440
+```
+
 ### Generate OpenClaw assets
 
 ```bash
@@ -224,6 +248,14 @@ python3 scripts/free_image_gen.py \
 ## Staged Workflow
 
 If you want a more production-like content workflow, you can split the pipeline into stages.
+
+Recommended order for article work:
+
+1. agent reads the full article
+2. agent writes `story-plan.json`
+3. renderer outputs the final pages
+
+Auto story generation still exists, but it should be treated as a draft or fallback when no explicit plan is available.
 
 ### Generate analysis + outline + prompts only
 
@@ -248,6 +280,67 @@ This structure makes it easier to:
 - inspect extracted sections
 - tweak prompts card by card
 - regenerate later without repeating the whole pipeline
+
+---
+
+## Render Controls
+
+The renderer now exposes lightweight controls so the agent can steer the look without changing code.
+
+Available global CLI controls:
+
+- `--theme auto|light|dark`
+- `--page-density auto|comfy|compact`
+- `--surface-style auto|soft|card|minimal|editorial`
+- `--accent auto|blue|green|warm|rose`
+
+The same controls can be set per page inside `story-plan.json`:
+
+- `theme`
+- `density`
+- `series_style`
+- `section_role`
+- `surface_style` or `style`
+- `accent`
+
+This makes it possible to do things like:
+
+- keep the cover dark but the detail pages light
+- make list-heavy pages compact
+- make reading-heavy pages comfy
+- use different accent colors for different sections
+- keep a whole card set loose or unified
+- mark a page as `chapter`, `body`, or `summary` so the renderer adjusts hierarchy without inventing its own editorial opinion
+- preserve article pages as prose while rendering explanatory pages as cards
+
+Additional agent-first controls:
+
+- `series_style: auto | loose | unified`
+- `section_role: auto | cover | chapter | body | summary`
+
+These are especially useful in `story-plan.json`, where the agent can decide:
+
+- which pages should feel like strong section openers
+- which pages should read like normal article pages
+- which pages should feel like closing / takeaway cards
+- how much visual consistency to keep across the whole set
+
+Currently, these controls are wired into:
+
+- `article_page`
+- `checklist`
+- `mechanism`
+- `catalog`
+- `qa`
+- `comparison`
+- `map`
+- `flow`
+- `timeline`
+
+That keeps the division of labor clean:
+
+- the agent decides pagination, page role, and visual intent
+- the renderer executes the layout reliably
 
 ---
 
@@ -306,6 +399,8 @@ If you already know the content style, guide it with:
 - `--story-strategy story`
 - `--story-strategy dense`
 - `--story-strategy visual`
+
+If quality matters more than speed, prefer `story-plan.json` over relying only on automatic splitting.
 
 ---
 
