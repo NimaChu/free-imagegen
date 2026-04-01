@@ -5,96 +5,144 @@ description: Fully local free text-to-image skill for OpenClaw and general asset
 
 # Free ImageGen
 
-纯本地免费流程：`Prompt -> SVG -> PNG`。  
-默认是通用插画创作，不限制在封面场景。
+Use this skill when the user wants **fully local image generation** with a `Prompt -> SVG -> PNG` pipeline and does **not** want online image APIs.
 
-## Quick Flow
+This skill is best for:
 
-1. 输入 prompt 与尺寸（主题、角色、场景、氛围、细节都可以描述）。
-2. 运行脚本生成 SVG。
-3. 用本地渲染器转为 PNG。
-4. OpenClaw 项目可一键生成 `assets/thumbnail` 与 `assets/icon`。
-5. 如果输入的是长文章，可自动拆成多张图文卡片。
+- text-heavy cover images
+- Xiaohongshu-style text covers
+- infographics and knowledge cards
+- article-to-image card sets
+- OpenClaw thumbnails and icons
+- simple stylized illustrations where editable SVG output matters
 
-## Composition Modes
+This skill is **not** a photorealistic diffusion model. It is a local, rule-based, SVG-first composition engine.
 
-- `illustration`（默认）：
-  - 普通绘图请求走这个模式（人物、物体、场景）
-- `infographic`（按关键词触发）：
-  - 当 prompt 出现 `信息图 / infographic / 知识卡片 / 图解 / 对比图 / 时间线 / 流程图 / 架构图`
-  - 适合高信息密度、卡片分区、重点数字展示
-  - 长文章输入也会自动优先走这个模式
-- `text_cover`（按关键词触发）：
-  - 当 prompt 出现 `文字封面 / text cover / title card / 文字海报 / 标题页`
-  - 适合大标题主导、少图形干扰的文字封面
-- `cover`（按关键词触发）：
-  - 当 prompt 明确出现 `封面/海报/thumbnail/cover` 时触发
-  - 适合宣传图或商店图
+## When To Use It
 
-## Main Commands
+Use `free-imagegen` when the request matches one or more of these cases:
 
-单图生成：
+- the user wants free local text-to-image generation
+- the user wants SVG output plus PNG export
+- the user wants a text cover, title card, poster, or thumbnail
+- the user wants an infographic, comparison card, flow card, QA card, map, or catalog
+- the user wants to turn an article into a sequence of image cards
+- the user wants OpenClaw-ready `thumbnail` / `icon` assets
 
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt "海底龙虾海报，左上角写NimaTech，底部大标题十三香小龙虾，红色龙虾，画面更热闹有气泡和光感" \
-  --output /absolute/path/output/lobster.png \
-  --svg-output /absolute/path/output/lobster.svg \
-  --width 1024 \
-  --height 1024
-```
+Do **not** use this skill when the user needs:
 
-信息图生成：
+- photorealistic generation
+- inpainting / outpainting
+- model-based image editing
+- online hosted image APIs
 
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt "AI 编码工作流信息图，标题 GPT-5.4 Coding Workflow，副标题 从需求到提交，核心数字 4，1. 需求理解 2. 代码实现 3. 验证测试 4. 提交发布" \
-  --output /absolute/path/output/workflow-infographic.png \
-  --svg-output /absolute/path/output/workflow-infographic.svg \
-  --width 1080 \
-  --height 1440
-```
+## Core Modes
 
-文章转图文卡组：
+Choose the mode from the user intent.
 
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt-file /absolute/path/article.txt \
-  --story-output-dir /absolute/path/output/article-story \
-  --story-strategy dense \
-  --width 1080 \
-  --height 1440
-```
+### `illustration`
 
-输出内容：
+Use for general drawing requests:
+
+- characters
+- objects
+- scenes
+- stylized posters without dense text
+
+This is the default when the prompt is mostly about a subject rather than content structure.
+
+### `text_cover`
+
+Use when the image is mainly driven by a headline or title.
+
+Good triggers:
+
+- `文字封面`
+- `text cover`
+- `title card`
+- `标题页`
+
+Use this for:
+
+- Xiaohongshu-style big-title covers
+- mobile-first text thumbnails
+- short-form content covers with strong hierarchy
+
+### `infographic`
+
+Use when the request is about explanation, structure, steps, comparison, grouped information, or knowledge cards.
+
+Good triggers:
+
+- `信息图`
+- `知识卡片`
+- `图解`
+- `流程图`
+- `对比图`
+- `架构图`
+- `产品地图`
+- `工具盘点`
+
+The generator may choose among layouts like:
+
+- `mechanism`
+- `comparison`
+- `flow`
+- `qa`
+- `timeline`
+- `catalog`
+- `map`
+
+### `cover`
+
+Use only when the prompt explicitly asks for:
+
+- `cover`
+- `thumbnail`
+- `poster`
+- `banner`
+- `封面`
+- `海报`
+
+### `article story`
+
+Use when the user provides a long article, post, or document and wants it expressed as a set of images.
+
+This is the preferred mode for OpenClaw article-to-visual workflows.
+
+Outputs can include:
 
 - `analysis.json`
 - `outline.md`
 - `prompts/*.md`
 - `01-cover.png/svg`
-- `02-*.png/svg` 到 `06-*.png/svg`
-- 自动按章节拆成封面图、公告卡、数据卡、原因卡等
-- 支持 `auto / story / dense / visual` 四种卡组策略
+- `02-*.png/svg` and later cards
 
-只生成分析、大纲和 prompt：
+## Decision Rules
+
+Use these defaults unless the user clearly asks otherwise.
+
+1. If the user gives a long article or says “turn this article into images”, use `--prompt-file` plus `--story-output-dir`.
+2. If the request is mostly text hierarchy and mobile readability, prefer `text_cover`.
+3. If the request is explanation, comparison, workflow, grouped products, or knowledge transfer, prefer `infographic`.
+4. If the request is a person, object, or scene, prefer `illustration`.
+5. If the user wants OpenClaw assets, use `--openclaw-project`.
+6. Keep output mobile-readable whenever text density is high: fewer lines, larger text, simpler structure.
+
+## Recommended Commands
+
+### Single image
 
 ```bash
 python3 scripts/free_image_gen.py \
-  --prompt-file /absolute/path/article.txt \
-  --story-output-dir /absolute/path/output/article-story \
-  --prompts-only
+  --prompt "长发可爱女生，清新梦幻插画风，柔和光影，细节丰富" \
+  --output /absolute/path/output/image.png \
+  --svg-output /absolute/path/output/image.svg \
+  --width 1024 \
+  --height 1280
 ```
 
-只根据已有卡组流程生成图片：
-
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt-file /absolute/path/article.txt \
-  --story-output-dir /absolute/path/output/article-story \
-  --images-only
-```
-
-文字封面图生成：
+### Text cover
 
 ```bash
 python3 scripts/free_image_gen.py \
@@ -105,7 +153,47 @@ python3 scripts/free_image_gen.py \
   --height 1440
 ```
 
-OpenClaw 资产一键生成：
+### Infographic
+
+```bash
+python3 scripts/free_image_gen.py \
+  --prompt "AI 编码工作流信息图，标题 GPT-5.4 Coding Workflow，副标题 从需求到提交，核心数字 4，1. 需求理解 2. 代码实现 3. 验证测试 4. 提交发布" \
+  --output /absolute/path/output/infographic.png \
+  --svg-output /absolute/path/output/infographic.svg \
+  --width 1080 \
+  --height 1440
+```
+
+### Article to image card set
+
+```bash
+python3 scripts/free_image_gen.py \
+  --prompt-file /absolute/path/article.txt \
+  --story-output-dir /absolute/path/output/article-story \
+  --story-strategy dense \
+  --width 1080 \
+  --height 1440
+```
+
+### Analysis / prompts only
+
+```bash
+python3 scripts/free_image_gen.py \
+  --prompt-file /absolute/path/article.txt \
+  --story-output-dir /absolute/path/output/article-story \
+  --prompts-only
+```
+
+### Images only
+
+```bash
+python3 scripts/free_image_gen.py \
+  --prompt-file /absolute/path/article.txt \
+  --story-output-dir /absolute/path/output/article-story \
+  --images-only
+```
+
+### OpenClaw assets
 
 ```bash
 python3 scripts/free_image_gen.py \
@@ -113,78 +201,95 @@ python3 scripts/free_image_gen.py \
   --openclaw-project /absolute/path/to/your-openclaw-app
 ```
 
-输出内容：
+## Story Strategies
 
-- `assets/thumbnail.svg` + `assets/thumbnail.png`
-- `assets/icon.svg` + `assets/icon.png`
-- 自动更新 `manifest.json` 的 `thumbnail/icon` 字段（若存在）
+Use `--story-strategy` when article intent is clear.
 
-## Prompt 引导建议
+- `auto`: default; let the tool infer the best structure
+- `story`: narrative / experience / personal workflow
+- `dense`: knowledge-heavy, structured, or terminology-heavy writing
+- `visual`: lighter, more cover-like, less dense per card
 
-- 直接描述你要画的内容，不需要参数化配置。
-- 做信息图时，尽量把标题、副标题、核心数字和要点都直接写进 prompt。
-- 做文章转图时，优先提供纯正文文本：
-  - 保留标题、段落、列表、表格内容
-  - 去掉原文中的配图说明或图片占位
-- 如果你知道内容更偏哪种表达，可以主动指定：
-  - `--story-strategy story`
-  - `--story-strategy dense`
-  - `--story-strategy visual`
-- 做文字封面时，明确写 `文字封面` 或 `title card`，这样会启用更强的排版模式。
-- 把你想要的文案直接写进 prompt（如果需要上字），例如：
-  - `左上角写 NimaTech`
-  - `底部大标题 十三香小龙虾`
-- 把主体和色彩写进 prompt，例如：
-  - `红色龙虾`
-  - `清新梦幻插画风，柔和光影`
-- 让 agent 自主补充细节，例如：
-  - `请丰富背景层次、光影和装饰元素`
+## Input Guidance
 
-人物示例：
+### For article workflows
 
-`长发可爱女生，清新梦幻插画风，柔和光影，细节丰富`
+Prefer cleaned text input:
 
-## HTTP Service
+- keep headings
+- keep bullet lists
+- keep tables as text
+- remove original embedded image placeholders
+- keep important numbers, contrasts, and section labels
 
-启动服务：
+### For infographic prompts
+
+Include as much structure as possible inside the prompt:
+
+- title
+- subtitle
+- highlighted number
+- bullets
+- grouped items
+- before/after language
+- step order
+
+### For text covers
+
+Include the real copy directly in the prompt.
+
+Good example:
+
+- `文字封面，标题 Vibe Coding 产品地图，副标题 主流编码代理、AI IDE 与云端开发工具全景` 
+
+### For illustrations
+
+Describe:
+
+- subject
+- color
+- mood
+- lighting
+- density of detail
+
+## Output Expectations
+
+When the task is text-heavy, optimize for:
+
+- phone readability first
+- fewer line breaks
+- larger text when space allows
+- simple hierarchy over decorative complexity
+- stable layouts over overly clever compositions
+
+When the task is article conversion, prefer a small set of clear cards over one overloaded image.
+
+## HTTP Wrapper
+
+Start local service:
 
 ```bash
 python3 scripts/free_image_http_service.py --host 127.0.0.1 --port 8787
 ```
 
-健康检查：
+Endpoints:
 
-```bash
-curl http://127.0.0.1:8787/health
-```
-
-单图生成：
-
-```bash
-curl -X POST http://127.0.0.1:8787/generate \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt":"海底龙虾海报，左上角写NimaTech，底部大标题十三香小龙虾，红色龙虾，增强光影和气泡细节",
-    "width":1024,
-    "height":1024,
-    "output":"/absolute/path/output/lobster.png",
-    "svg_output":"/absolute/path/output/lobster.svg"
-  }'
-```
-
-OpenClaw 资产生成：
-
-```bash
-curl -X POST http://127.0.0.1:8787/openclaw-assets \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt":"space lobster game cover",
-    "project":"/absolute/path/to/openclaw-project"
-  }'
-```
+- `/health`
+- `/generate`
+- `/openclaw-assets`
 
 ## Files
 
-- `scripts/free_image_gen.py`: 本地 SVG 生成 + PNG 导出核心
-- `scripts/free_image_http_service.py`: 本地 HTTP 封装
-- `references/providers.md`: 本地渲染链路说明
+- `scripts/free_image_gen.py`: core SVG generation and PNG export
+- `scripts/free_image_http_service.py`: local HTTP wrapper
+- `references/providers.md`: renderer notes
+
+## Practical Limits
+
+Keep these in mind while using the skill:
+
+- best results come from structured prompts
+- article summarization is heuristic, not model-level semantic understanding
+- illustration mode is stylized, not photorealistic
+- final PNG fidelity depends on the local SVG renderer available on the machine
+- some dense inputs may still need prompt cleanup for the cleanest mobile result
