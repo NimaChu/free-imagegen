@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/NimaChu/free-imagegen/blob/main/references/story-plan.schema.json",
+  "title": "Free ImageGen Story Plan",
+  "description": "Agent-authored page plan for local article-to-image rendering.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "title": { "type": "string", "description": "Story set title used for the auto-generated cover." },
+    "subtitle": { "type": "string", "description": "Optional story set subtitle used on the cover." },
+    "strategy": { "type": "string", "enum": ["agent", "auto", "story", "dense", "visual"], "default": "agent" },
+    "theme": { "$ref": "#/$defs/theme" },
+    "density": { "$ref": "#/$defs/density" },
+    "series_style": { "$ref": "#/$defs/seriesStyle" },
+    "section_role": { "$ref": "#/$defs/sectionRole" },
+    "surface_style": { "$ref": "#/$defs/surfaceStyle" },
+    "style": { "$ref": "#/$defs/surfaceStyle" },
+    "accent": { "$ref": "#/$defs/accent" },
+    "key_numbers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional key numbers surfaced in analysis.json."
+    },
+    "top_bullets": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional top-level summary bullets surfaced in analysis.json."
+    },
+    "cards": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/card" },
+      "description": "Ordered pages after the auto-generated cover."
+    }
+  },
+  "required": ["title", "cards"],
+  "$defs": {
+    "theme": { "type": "string", "enum": ["auto", "light", "dark"] },
+    "density": { "type": "string", "enum": ["auto", "comfy", "compact"] },
+    "seriesStyle": { "type": "string", "enum": ["auto", "loose", "unified"] },
+    "sectionRole": { "type": "string", "enum": ["auto", "cover", "chapter", "body", "summary"] },
+    "surfaceStyle": { "type": "string", "enum": ["auto", "soft", "card", "minimal", "editorial"] },
+    "accent": { "type": "string", "enum": ["auto", "blue", "green", "warm", "rose"] },
+    "pageKind": {
+      "type": "string",
+      "enum": [
+        "article_page",
+        "text_cover",
+        "mechanism",
+        "checklist",
+        "qa",
+        "catalog",
+        "map",
+        "comparison",
+        "flow",
+        "timeline",
+        "article_note"
+      ]
+    },
+    "card": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "$ref": "#/$defs/pageKind" },
+        "heading": { "type": "string", "description": "Used for filename stem and outline heading." },
+        "title": { "type": "string", "description": "Main visible title for the page." },
+        "subtitle": { "type": "string" },
+        "kicker": { "type": "string", "description": "Optional small top label. Omit unless you want it shown." },
+        "emphasis": { "type": "string", "description": "Optional badge / highlighted phrase." },
+        "bullets": {
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 8,
+          "description": "Body content. Keep each item concise for mobile readability." 
+        },
+        "image_path": { "type": "string", "description": "Absolute local image path when this page should embed a real image." },
+        "theme": { "$ref": "#/$defs/theme" },
+        "density": { "$ref": "#/$defs/density" },
+        "series_style": { "$ref": "#/$defs/seriesStyle" },
+        "section_role": { "$ref": "#/$defs/sectionRole" },
+        "surface_style": { "$ref": "#/$defs/surfaceStyle" },
+        "style": { "$ref": "#/$defs/surfaceStyle" },
+        "accent": { "$ref": "#/$defs/accent" }
+      },
+      "required": ["kind"],
+      "anyOf": [
+        { "required": ["title"] },
+        { "required": ["heading"] }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "title": "OpenClaw 入门图文卡组",
+      "subtitle": "agent 先定分页，renderer 再稳定落版",
+      "series_style": "unified",
+      "cards": [
+        {
+          "kind": "article_page",
+          "title": "什么是 OpenClaw",
+          "subtitle": "先保留原文语气，再决定哪些内容转卡片",
+          "section_role": "chapter",
+          "theme": "light",
+          "density": "comfy",
+          "bullets": [
+            "龙虾（OpenClaw）是一款开源的 AI 智能体框架。",
+            "核心定位是能动手做事的 AI 助手。"
+          ]
+        },
+        {
+          "kind": "mechanism",
+          "title": "OpenClaw 的 4 个核心特点",
+          "section_role": "body",
+          "theme": "dark",
+          "accent": "green",
+          "bullets": [
+            "执行能力 / 真正把指令变成结果",
+            "拥有记忆 / 能记住偏好和上下文",
+            "持续进化 / 可接入技能与社区",
+            "主动工作 / 7x24 小时持续执行"
+          ]
+        }
+      ]
+    }
+  ]
+}

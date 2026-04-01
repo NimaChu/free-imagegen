@@ -108,6 +108,12 @@ Instead of forcing the renderer to guess every page break and layout, let the ag
 
 Then render that plan directly with `--story-plan-file`.
 
+To make agent integration more stable, the repo now also ships:
+
+- `references/story-plan.schema.json`
+- `references/story-plan.template.json`
+- `references/story-plan.guide.md`
+
 ### 4. OpenClaw Assets
 
 It can generate:
@@ -341,6 +347,8 @@ That keeps the division of labor clean:
 
 - the agent decides pagination, page role, and visual intent
 - the renderer executes the layout reliably
+
+If a `story-plan.json` is malformed, the CLI now fails fast with a clear validation error and points the agent to the bundled schema and template.
 
 ---
 

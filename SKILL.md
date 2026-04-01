@@ -130,6 +130,12 @@ Use this when an agent can read the full article first and decide:
 
 This is now the preferred OpenClaw workflow for rich article conversion because it keeps judgment in the agent and keeps rendering in the skill.
 
+Use these bundled references when an agent needs a stable output contract:
+
+- `references/story-plan.schema.json`
+- `references/story-plan.template.json`
+- `references/story-plan.guide.md`
+
 ## Decision Rules
 
 Use these defaults unless the user clearly asks otherwise.
@@ -294,6 +300,8 @@ Prefer letting the agent decide:
 - which visual treatment fits each page
 
 Use the renderer as an execution engine, not as the only decision-maker.
+
+If the agent emits an invalid `story-plan.json`, the CLI now stops early with a validation error and points back to the bundled template and schema.
 
 ### For article workflows
 

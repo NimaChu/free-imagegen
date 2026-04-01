@@ -1,0 +1,58 @@
+{
+  "title": "把这里换成整套图的总标题",
+  "subtitle": "一句话说明这组图想表达什么",
+  "strategy": "agent",
+  "series_style": "unified",
+  "theme": "auto",
+  "density": "auto",
+  "accent": "auto",
+  "cards": [
+    {
+      "kind": "article_page",
+      "heading": "章节一",
+      "title": "这里是第一页标题",
+      "subtitle": "适合保留原文段落的解释型内容",
+      "section_role": "chapter",
+      "theme": "light",
+      "density": "comfy",
+      "surface_style": "editorial",
+      "bullets": [
+        "第一段原文或改写段落。",
+        "第二段原文或改写段落。",
+        "第三段原文或改写段落。"
+      ]
+    },
+    {
+      "kind": "mechanism",
+      "heading": "章节二",
+      "title": "这里是机制卡标题",
+      "subtitle": "适合能力点、差异点、方法论",
+      "section_role": "body",
+      "theme": "dark",
+      "density": "compact",
+      "accent": "green",
+      "bullets": [
+        "要点一 / 用短句描述核心价值",
+        "要点二 / 一条只说一件事",
+        "要点三 / 尽量写成手机上一眼能读完",
+        "要点四 / 必要时再加第四点"
+      ]
+    },
+    {
+      "kind": "checklist",
+      "heading": "总结页",
+      "title": "这里是总结页标题",
+      "subtitle": "适合结论、行动建议、避坑清单",
+      "section_role": "summary",
+      "theme": "dark",
+      "density": "compact",
+      "accent": "blue",
+      "bullets": [
+        "建议一 / 先做最重要的动作",
+        "建议二 / 避免过早陷入细节",
+        "建议三 / 用 agent 决定分页和版式",
+        "建议四 / 用 renderer 稳定落版"
+      ]
+    }
+  ]
+}

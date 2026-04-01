@@ -17,6 +17,29 @@ from typing import Any
 
 
 EXPORT_FALLBACK_SCRIPT = Path("/Users/chunima/.codex/skills/svg-png-cover-generator/scripts/export_svg_to_png.sh")
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+STORY_PLAN_SCHEMA_PATH = REPO_ROOT / "references" / "story-plan.schema.json"
+STORY_PLAN_TEMPLATE_PATH = REPO_ROOT / "references" / "story-plan.template.json"
+SUPPORTED_PAGE_KINDS = {
+    "article_page",
+    "text_cover",
+    "mechanism",
+    "checklist",
+    "qa",
+    "catalog",
+    "map",
+    "comparison",
+    "flow",
+    "timeline",
+    "article_note",
+}
+SUPPORTED_THEMES = {"auto", "light", "dark"}
+SUPPORTED_DENSITIES = {"auto", "comfy", "compact"}
+SUPPORTED_SERIES_STYLES = {"auto", "loose", "unified"}
+SUPPORTED_SECTION_ROLES = {"auto", "cover", "chapter", "body", "summary"}
+SUPPORTED_SURFACE_STYLES = {"auto", "soft", "card", "minimal", "editorial"}
+SUPPORTED_ACCENTS = {"auto", "blue", "green", "warm", "rose"}
 
 
 def _slugify(text: str) -> str:
@@ -1137,6 +1160,99 @@ def _story_plan_analysis(plan: dict[str, Any]) -> dict[str, Any]:
         "source_line_count": 0,
         "source": "agent-plan",
     }
+
+
+def _validate_enum_field(errors: list[str], where: str, value: Any, allowed: set[str], field_name: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str) or value not in allowed:
+        allowed_text = ", ".join(sorted(allowed))
+        errors.append(f"{where}.{field_name} must be one of: {allowed_text}")
+
+
+def _validate_story_plan(plan: Any) -> dict[str, Any]:
+    errors: list[str] = []
+    if not isinstance(plan, dict):
+        raise ValueError("story-plan must be a JSON object")
+
+    cards = plan.get("cards")
+    if not isinstance(cards, list) or not cards:
+        errors.append("story-plan.cards must be a non-empty array")
+        cards = []
+
+    for field_name, allowed in [
+        ("theme", SUPPORTED_THEMES),
+        ("density", SUPPORTED_DENSITIES),
+        ("series_style", SUPPORTED_SERIES_STYLES),
+        ("section_role", SUPPORTED_SECTION_ROLES),
+        ("accent", SUPPORTED_ACCENTS),
+    ]:
+        _validate_enum_field(errors, "story-plan", plan.get(field_name), allowed, field_name)
+
+    if plan.get("surface_style") is not None:
+        _validate_enum_field(errors, "story-plan", plan.get("surface_style"), SUPPORTED_SURFACE_STYLES, "surface_style")
+    if plan.get("style") is not None:
+        _validate_enum_field(errors, "story-plan", plan.get("style"), SUPPORTED_SURFACE_STYLES, "style")
+
+    if len(cards) > 20:
+        errors.append("story-plan.cards supports at most 20 cards per render")
+
+    for idx, card in enumerate(cards):
+        where = f"story-plan.cards[{idx}]"
+        if not isinstance(card, dict):
+            errors.append(f"{where} must be an object")
+            continue
+
+        kind = card.get("kind", "article_page")
+        if kind not in SUPPORTED_PAGE_KINDS:
+            errors.append(f"{where}.kind must be one of: {', '.join(sorted(SUPPORTED_PAGE_KINDS))}")
+
+        title = card.get("title")
+        heading = card.get("heading")
+        if not isinstance(title, str) and not isinstance(heading, str):
+            errors.append(f"{where} should provide at least one of title or heading")
+
+        for text_field in ["title", "heading", "subtitle", "kicker", "emphasis", "image_path"]:
+            value = card.get(text_field)
+            if value is not None and not isinstance(value, str):
+                errors.append(f"{where}.{text_field} must be a string when provided")
+
+        bullets = card.get("bullets")
+        if bullets is not None:
+            if not isinstance(bullets, list):
+                errors.append(f"{where}.bullets must be an array of strings")
+            else:
+                for bullet_idx, bullet in enumerate(bullets):
+                    if not isinstance(bullet, str):
+                        errors.append(f"{where}.bullets[{bullet_idx}] must be a string")
+                if len(bullets) > 8:
+                    errors.append(f"{where}.bullets should stay at 8 items or fewer for mobile readability")
+
+        for field_name, allowed in [
+            ("theme", SUPPORTED_THEMES),
+            ("density", SUPPORTED_DENSITIES),
+            ("series_style", SUPPORTED_SERIES_STYLES),
+            ("section_role", SUPPORTED_SECTION_ROLES),
+            ("accent", SUPPORTED_ACCENTS),
+        ]:
+            _validate_enum_field(errors, where, card.get(field_name), allowed, field_name)
+
+        if card.get("surface_style") is not None:
+            _validate_enum_field(errors, where, card.get("surface_style"), SUPPORTED_SURFACE_STYLES, "surface_style")
+        if card.get("style") is not None:
+            _validate_enum_field(errors, where, card.get("style"), SUPPORTED_SURFACE_STYLES, "style")
+
+    if errors:
+        details = "\n- ".join(errors[:12])
+        if len(errors) > 12:
+            details += f"\n- ...and {len(errors) - 12} more"
+        raise ValueError(
+            "story-plan validation failed:\n- "
+            + details
+            + f"\nSee template: {STORY_PLAN_TEMPLATE_PATH}\nSee schema: {STORY_PLAN_SCHEMA_PATH}"
+        )
+
+    return plan
 
 
 def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -2728,26 +2844,27 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    prompt = args.prompt
-    if args.prompt_file:
-        prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8")
-    story_plan = None
-    if args.story_plan_file:
-        story_plan = json.loads(Path(args.story_plan_file).expanduser().read_text(encoding="utf-8"))
-        if prompt is None:
-            prompt = story_plan.get("title", "Agent story plan")
-    if prompt is not None:
-        prompt = _append_render_controls(
-            prompt,
-            args.theme,
-            args.page_density,
-            args.surface_style,
-            args.accent,
-            args.series_style,
-            args.section_role,
-        )
 
     try:
+        prompt = args.prompt
+        if args.prompt_file:
+            prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8")
+        story_plan = None
+        if args.story_plan_file:
+            story_plan = _validate_story_plan(json.loads(Path(args.story_plan_file).expanduser().read_text(encoding="utf-8")))
+            if prompt is None:
+                prompt = story_plan.get("title", "Agent story plan")
+        if prompt is not None:
+            prompt = _append_render_controls(
+                prompt,
+                args.theme,
+                args.page_density,
+                args.surface_style,
+                args.accent,
+                args.series_style,
+                args.section_role,
+            )
+
         if args.openclaw_project:
             result = generate_openclaw_assets(args.openclaw_project, prompt)
         elif args.story_output_dir:
