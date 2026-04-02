@@ -47,6 +47,7 @@ SUPPORTED_ACCENTS = {"auto", "blue", "green", "warm", "rose"}
 SUPPORTED_TONES = {"auto", "calm", "playful", "bold", "editorial"}
 SUPPORTED_DECOR_LEVELS = {"auto", "none", "low", "medium"}
 SUPPORTED_EMOJI_POLICIES = {"auto", "none", "sparse", "expressive"}
+SUPPORTED_COVER_LAYOUTS = {"auto", "title_first", "hero_emoji_top"}
 
 
 def _slugify(text: str) -> str:
@@ -404,6 +405,8 @@ def _strip_control_directives(text: str) -> str:
         r"(?:^|\s)(?:语气|气质|tone)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
         r"(?:^|\s)(?:装饰密度|装饰程度|decor-level|decor_level)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
         r"(?:^|\s)(?:表情策略|emoji-policy|emoji_policy)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:封面布局|cover-layout|cover_layout)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:主视觉表情|封面表情|hero-emoji|hero_emoji)\s*[:：]\s*[^\n]+",
     ]
     out = text
     for pattern in patterns:
@@ -433,6 +436,8 @@ def _resolve_render_controls(prompt: str) -> dict[str, str]:
     tone_raw = direct_value(["语气", "气质", "tone"])
     decor_raw = direct_value(["装饰密度", "装饰程度", "decor-level", "decor_level"])
     emoji_raw = direct_value(["表情策略", "emoji-policy", "emoji_policy"])
+    cover_layout_raw = direct_value(["封面布局", "cover-layout", "cover_layout"])
+    hero_emoji_raw = _extract_named_value(prompt, ["主视觉表情", "封面表情", "hero-emoji", "hero_emoji"]) or ""
 
     def normalize_theme(value: str) -> str:
         if value in {"dark", "深色", "夜间", "暗色"}:
@@ -517,6 +522,13 @@ def _resolve_render_controls(prompt: str) -> dict[str, str]:
             return "expressive"
         return "auto"
 
+    def normalize_cover_layout(value: str) -> str:
+        if value in {"title_first", "标题优先", "传统"}:
+            return "title_first"
+        if value in {"hero_emoji_top", "主视觉表情", "大表情", "表情在上"}:
+            return "hero_emoji_top"
+        return "auto"
+
     theme = normalize_theme(theme_raw)
     density = normalize_density(density_raw)
     series_style = normalize_series_style(series_style_raw)
@@ -526,6 +538,8 @@ def _resolve_render_controls(prompt: str) -> dict[str, str]:
     tone = normalize_tone(tone_raw)
     decor_level = normalize_decor(decor_raw)
     emoji_policy = normalize_emoji(emoji_raw)
+    cover_layout = normalize_cover_layout(cover_layout_raw)
+    hero_emoji = hero_emoji_raw.strip()
 
     if theme == "auto" and any(token in prompt_lower for token in ["深色", "夜间", "暗色", "dark mode"]):
         theme = "dark"
@@ -543,6 +557,8 @@ def _resolve_render_controls(prompt: str) -> dict[str, str]:
         decor_level = "medium"
     if tone == "playful" and emoji_policy == "auto":
         emoji_policy = "sparse"
+    if cover_layout == "auto" and any(token in prompt_lower for token in ["大表情", "主视觉表情", "表情在上"]):
+        cover_layout = "hero_emoji_top"
 
     return {
         "theme": theme,
@@ -554,6 +570,8 @@ def _resolve_render_controls(prompt: str) -> dict[str, str]:
         "tone": tone,
         "decor_level": decor_level,
         "emoji_policy": emoji_policy,
+        "cover_layout": cover_layout,
+        "hero_emoji": hero_emoji,
     }
 
 
@@ -949,6 +967,42 @@ def _split_text_tail_chars(text: str, tail_chars: int) -> tuple[str, str] | None
     return left, right
 
 
+def _extract_trailing_phrase(text: str) -> tuple[str, str]:
+    stripped = re.sub(r"\s+", " ", text).strip()
+    match = re.match(r"^(.*?)([A-Za-z0-9][A-Za-z0-9\-\+\.]*(?:\s+[A-Za-z0-9][A-Za-z0-9\-\+\.]*){0,2})$", stripped)
+    if not match:
+        return stripped, ""
+    head = match.group(1).rstrip(" ，,：:")
+    tail = match.group(2).strip()
+    if not head or not tail:
+        return stripped, ""
+    if len(tail.split()) > 3:
+        return stripped, ""
+    return head, tail
+
+
+def _hero_cover_title_lines(text: str, width: int) -> tuple[list[str], int]:
+    head, tail = _extract_trailing_phrase(text)
+    size_candidates = [max(68, int(width * 0.088)), max(62, int(width * 0.082)), max(56, int(width * 0.076))]
+    if tail and re.search(r"[\u4e00-\u9fff]", head):
+        for candidate_size in size_candidates:
+            if _estimate_line_width(tail, candidate_size) > width * 0.64:
+                continue
+            head_lines = _balanced_wrap_lines(head, candidate_size, width * 0.80, max_lines=2, prefer_short_tail=False)
+            if head_lines and len(head_lines) <= 2:
+                lines = head_lines + [tail]
+                if len(lines) <= 3:
+                    return lines, candidate_size
+    return _fit_text_block(
+        text,
+        [14, 12, 10, 8] if re.search(r"[\u4e00-\u9fff]", text) else [20, 18, 16],
+        size_candidates,
+        3,
+        max_width_px=width * 0.80,
+        prefer_single_mixed_short=True,
+    )
+
+
 def _cover_title_lines(text: str, width: int, section_role: str) -> tuple[list[str], int]:
     mixed = bool(re.search(r"[\u4e00-\u9fff]", text) and re.search(r"[A-Za-z]", text))
     if mixed and "：" in text:
@@ -1044,6 +1098,23 @@ def _emoji_seed_for_text(text: str) -> str:
     return "✨"
 
 
+def _auto_hero_emoji(text: str, tone: str = "calm") -> str:
+    lower = (text or "").lower()
+    pairs = [
+        (["为什么", "为啥", "how", "why"], "🤔"),
+        (["ai", "agent", "智能体", "harness"], "🤖"),
+        (["风险", "警告", "注意", "坑"], "⚠️"),
+        (["增长", "机会", "突破", "爆发"], "🚀"),
+        (["方法", "步骤", "指南", "攻略"], "🧭"),
+        (["工具", "产品", "地图", "生态"], "🧰"),
+        (["发现", "信号", "新变化"], "💡"),
+    ]
+    for needles, emoji in pairs:
+        if any(token in lower for token in needles):
+            return emoji
+    return "✨" if tone == "playful" else "💡"
+
+
 def _fun_badges(copy: dict[str, Any], controls: dict[str, str], limit: int = 2) -> list[str]:
     tone, decor_level, emoji_policy = _resolved_playful_controls(controls)
     if decor_level == "none" or emoji_policy == "none":
@@ -1097,7 +1168,7 @@ def _badge_pills_svg(
 def _derive_info_copy(prompt: str, mode: str = "infographic") -> dict[str, Any]:
     prompt = _strip_control_directives(_strip_image_directives(prompt))
     title = _extract_labeled_value(prompt, ["标题", "主标题", "title"]) or "信息图概览"
-    subtitle = _extract_labeled_value(prompt, ["副标题", "subtitle"]) or "清晰层级 / 重点突出 / 本地生成"
+    subtitle = _extract_labeled_value(prompt, ["副标题", "subtitle"]) or ("" if mode == "text_cover" else "清晰层级 / 重点突出 / 本地生成")
     kicker = _extract_labeled_value(prompt, ["角标", "badge"]) or ("TEXT COVER" if mode == "text_cover" else "INFOGRAPHIC")
     emphasis = _extract_labeled_value(prompt, ["核心数字", "重点数字", "highlight"]) or ""
     footer = _extract_labeled_value(prompt, ["页脚", "底部文案", "footer"]) or ""
@@ -1543,6 +1614,7 @@ def _validate_story_plan(plan: Any) -> dict[str, Any]:
         ("density", SUPPORTED_DENSITIES),
         ("series_style", SUPPORTED_SERIES_STYLES),
         ("section_role", SUPPORTED_SECTION_ROLES),
+        ("cover_layout", SUPPORTED_COVER_LAYOUTS),
         ("accent", SUPPORTED_ACCENTS),
         ("tone", SUPPORTED_TONES),
         ("decor_level", SUPPORTED_DECOR_LEVELS),
@@ -1573,7 +1645,7 @@ def _validate_story_plan(plan: Any) -> dict[str, Any]:
         if not isinstance(title, str) and not isinstance(heading, str):
             errors.append(f"{where} should provide at least one of title or heading")
 
-        for text_field in ["title", "heading", "subtitle", "kicker", "emphasis", "image_path", "svg_markup", "svg_path"]:
+        for text_field in ["title", "heading", "subtitle", "kicker", "emphasis", "image_path", "svg_markup", "svg_path", "hero_emoji"]:
             value = card.get(text_field)
             if value is not None and not isinstance(value, str):
                 errors.append(f"{where}.{text_field} must be a string when provided")
@@ -1594,6 +1666,7 @@ def _validate_story_plan(plan: Any) -> dict[str, Any]:
             ("density", SUPPORTED_DENSITIES),
             ("series_style", SUPPORTED_SERIES_STYLES),
             ("section_role", SUPPORTED_SECTION_ROLES),
+            ("cover_layout", SUPPORTED_COVER_LAYOUTS),
             ("accent", SUPPORTED_ACCENTS),
             ("tone", SUPPORTED_TONES),
             ("decor_level", SUPPORTED_DECOR_LEVELS),
@@ -1692,7 +1765,7 @@ def _story_plan_lints(plan: dict[str, Any]) -> list[dict[str, str]]:
 def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     analysis = _story_plan_analysis(plan)
     global_title = analysis["title"]
-    global_subtitle = analysis["subtitle"] or "按 agent 规划渲染"
+    global_subtitle = analysis["subtitle"] or ""
     global_theme = plan.get("theme", "auto")
     global_density = plan.get("density", "auto")
     global_series_style = plan.get("series_style", "auto")
@@ -1702,6 +1775,8 @@ def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], 
     global_tone = plan.get("tone", "auto")
     global_decor_level = plan.get("decor_level", "auto")
     global_emoji_policy = plan.get("emoji_policy", "auto")
+    global_cover_layout = plan.get("cover_layout", "auto")
+    global_hero_emoji = plan.get("hero_emoji", "")
     cards: list[dict[str, Any]] = []
     raw_cards = plan.get("cards", []) or []
     card_index = 1
@@ -1718,6 +1793,8 @@ def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], 
             global_tone,
             global_decor_level,
             global_emoji_policy,
+            global_cover_layout,
+            global_hero_emoji,
         )
         cards.append(
             {
@@ -1733,6 +1810,8 @@ def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], 
                 "tone": global_tone,
                 "decor_level": global_decor_level,
                 "emoji_policy": global_emoji_policy,
+                "cover_layout": global_cover_layout,
+                "hero_emoji": global_hero_emoji,
             }
         )
         card_index += 1
@@ -1756,6 +1835,8 @@ def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], 
             raw.get("tone", global_tone),
             raw.get("decor_level", global_decor_level),
             raw.get("emoji_policy", global_emoji_policy),
+            raw.get("cover_layout", global_cover_layout),
+            raw.get("hero_emoji", global_hero_emoji),
         )
         if raw.get("image_path"):
             prompt = f"{prompt}\n插图文件：{raw['image_path']}"
@@ -1777,6 +1858,8 @@ def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], 
                 "tone": raw.get("tone", global_tone),
                 "decor_level": raw.get("decor_level", global_decor_level),
                 "emoji_policy": raw.get("emoji_policy", global_emoji_policy),
+                "cover_layout": raw.get("cover_layout", global_cover_layout),
+                "hero_emoji": raw.get("hero_emoji", global_hero_emoji),
                 "image_path": raw.get("image_path"),
                 "svg_markup": raw.get("svg_markup"),
                 "svg_path": raw.get("svg_path"),
@@ -2179,14 +2262,21 @@ def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
     focus_token = _extract_focus_token(clean_title)
     is_tall = (height / max(width, 1)) >= 1.35
     lower_title = clean_title.lower()
+    tone, _, emoji_policy = _resolved_playful_controls(controls)
+    section_role = controls.get("section_role", "auto")
+    cover_layout = controls.get("cover_layout", "auto")
+    if cover_layout == "auto":
+        cover_layout = "hero_emoji_top" if section_role == "cover" else "title_first"
+    hero_emoji = (controls.get("hero_emoji") or "").strip() or _auto_hero_emoji(clean_title, tone)
     if any(token in lower_title for token in ["为什么", "为啥", "how", "why"]):
         variant = "note"
     else:
         variant = "quote" if focus_token else ("note" if seed % 2 else "quote")
+    if section_role == "cover" and cover_layout == "hero_emoji_top":
+        variant = "quote"
 
     if variant == "quote":
         series_unified = controls.get("series_style") == "unified"
-        section_role = controls.get("section_role", "auto")
         if controls["theme"] == "dark":
             bg = "#161821"
             ink = "#F3F5FF"
@@ -2199,8 +2289,10 @@ def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
             soft = "#DBCDF4"
         quote_size = max(56, int(width * 0.10))
         title_scale_bump = 4 if section_role == "cover" else 2 if section_role == "chapter" else 0
-        if section_role == "cover":
+        if section_role == "cover" and cover_layout == "title_first":
             title_lines, title_size = _cover_title_lines(clean_title, width, section_role)
+        elif section_role == "cover" and cover_layout == "hero_emoji_top":
+            title_lines, title_size = _hero_cover_title_lines(clean_title, width)
         else:
             title_lines, title_size = _fit_text_block(
                 clean_title,
@@ -2218,10 +2310,16 @@ def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
             max_width_px=width * 0.72,
         )
         base_x = width * 0.12
-        title_y = height * (0.36 if section_role == "cover" else 0.38 if is_tall else 0.43)
+        hero_mode = section_role == "cover" and cover_layout == "hero_emoji_top"
+        title_y = height * (0.50 if hero_mode else 0.36 if section_role == "cover" else 0.38 if is_tall else 0.43)
         last_line = title_lines[-1] if title_lines else ""
         last_line_width = _estimate_line_width(last_line, title_size)
-        if section_role == "cover":
+        if hero_mode:
+            highlight_width = min(width * 0.40, max(width * 0.18, last_line_width * 0.64))
+            highlight_x = min(width * 0.80, base_x + max(last_line_width * 0.10, width * 0.06))
+            highlight_y = title_y + (len(title_lines) - 1) * title_size * 1.04 - title_size * 0.22
+            highlight_h = max(height * 0.024, title_size * 0.28)
+        elif section_role == "cover":
             highlight_width = min(width * 0.32, max(width * 0.16, last_line_width * 0.72))
             highlight_x = min(width * 0.80, base_x + max(last_line_width * 0.18, width * 0.10))
             highlight_y = title_y + (len(title_lines) - 1) * title_size * 1.04 - title_size * 0.26
@@ -2231,16 +2329,29 @@ def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
             highlight_x = width * 0.40
             highlight_y = height * (0.395 if is_tall else 0.445)
             highlight_h = height * 0.028
-        subtitle_y = min(height * 0.84, title_y + _text_block_height(title_lines, title_size, 1.04) + (height * 0.12 if series_unified else height * 0.10))
+        subtitle_y = min(height * 0.84, title_y + _text_block_height(title_lines, title_size, 1.04) + (height * (0.08 if hero_mode else 0.12 if series_unified else 0.10)))
         sparkles = _decor_sparkles(width, height, controls, accent, controls["theme"] == "dark")
+        hero_svg = ""
+        quote_marks_svg = ""
+        if hero_mode:
+            hero_size = max(232, int(width * 0.30))
+            hero_y = height * 0.29
+            hero_svg = _svg_text_block(width * 0.50, hero_y, [hero_emoji], hero_size, accent, weight=800, anchor="middle")
+        else:
+            quote_marks_svg = (
+                f'<text x="{width*0.10:.2f}" y="{height*(0.14 if series_unified else 0.16):.2f}" font-family="Georgia, Times New Roman, serif" '
+                f'font-size="{quote_size}" font-weight="900" fill="{soft}" opacity="0.8">“</text>'
+                f'<text x="{width*0.16:.2f}" y="{height*(0.14 if series_unified else 0.16):.2f}" font-family="Georgia, Times New Roman, serif" '
+                f'font-size="{quote_size}" font-weight="900" fill="{soft}" opacity="0.8">“</text>'
+            )
         return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <rect x="0" y="0" width="{width}" height="{height}" fill="{bg}"/>
   {sparkles}
-  <text x="{width*0.10:.2f}" y="{height*(0.14 if series_unified else 0.16):.2f}" font-family="Georgia, Times New Roman, serif" font-size="{quote_size}" font-weight="900" fill="{soft}" opacity="0.8">“</text>
-  <text x="{width*0.16:.2f}" y="{height*(0.14 if series_unified else 0.16):.2f}" font-family="Georgia, Times New Roman, serif" font-size="{quote_size}" font-weight="900" fill="{soft}" opacity="0.8">“</text>
+  {quote_marks_svg}
+  {hero_svg}
   <rect x="{highlight_x:.2f}" y="{highlight_y:.2f}" width="{highlight_width:.2f}" height="{highlight_h:.2f}" rx="{highlight_h*0.15:.2f}" fill="{accent}"/>
   {_svg_text_block(base_x, title_y, title_lines, title_size, ink, weight=900, line_gap=1.04)}
-  {_title_emoji_svg(base_x, title_y, title_lines, title_size, trailing_title_emoji, width, accent, scale=2.35 if section_role == "cover" else 1.9)}
+  {_title_emoji_svg(base_x, title_y, title_lines, title_size, trailing_title_emoji, width, accent, scale=1.7 if hero_mode else 2.35 if section_role == "cover" else 1.9)}
   {_svg_text_block(base_x, subtitle_y, subtitle_lines[:2], subtitle_size, "#7A738B", weight=620, line_gap=1.20)}
 </svg>'''
 
@@ -2256,7 +2367,6 @@ def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
         shadow = "#C7D5FF"
         ink = "#121212"
         meta = "#5B82F4"
-    tone, _, emoji_policy = _resolved_playful_controls(controls)
     emoji = "🤔" if "为什么" in copy["title"] or "为啥" in copy["title"] else ("🫧" if tone == "playful" and emoji_policy != "none" else "...")
     paper_x = width * 0.08
     paper_y = height * 0.08
@@ -3184,6 +3294,8 @@ def _append_render_controls(
     tone: str = "auto",
     decor_level: str = "auto",
     emoji_policy: str = "auto",
+    cover_layout: str = "auto",
+    hero_emoji: str = "",
 ) -> str:
     parts = [prompt]
     if theme and theme != "auto":
@@ -3204,6 +3316,10 @@ def _append_render_controls(
         parts.append(f"装饰密度：{decor_level}")
     if emoji_policy and emoji_policy != "auto":
         parts.append(f"表情策略：{emoji_policy}")
+    if cover_layout and cover_layout != "auto":
+        parts.append(f"封面布局：{cover_layout}")
+    if hero_emoji:
+        parts.append(f"主视觉表情：{hero_emoji}")
     return "\n".join(parts)
 
 
@@ -3463,6 +3579,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--tone", choices=["auto", "calm", "playful", "bold", "editorial"], default="auto", help="Overall tone hint for expressive vs restrained rendering")
     parser.add_argument("--decor-level", choices=["auto", "none", "low", "medium"], default="auto", help="How much decorative treatment to allow")
     parser.add_argument("--emoji-policy", choices=["auto", "none", "sparse", "expressive"], default="auto", help="How freely emoji-style accents may appear")
+    parser.add_argument("--cover-layout", choices=["auto", "title_first", "hero_emoji_top"], default="auto", help="Cover composition strategy")
+    parser.add_argument("--hero-emoji", default="", help="Explicit hero emoji for cover-style pages")
     parser.add_argument("--outline-only", action="store_true", help="Write analysis and outline only")
     parser.add_argument("--prompts-only", action="store_true", help="Write analysis, outline, and prompt files only")
     parser.add_argument("--images-only", action="store_true", help="Generate images using existing or regenerated prompt files")
@@ -3496,6 +3614,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.tone,
                 args.decor_level,
                 args.emoji_policy,
+                args.cover_layout,
+                args.hero_emoji,
             )
 
         if args.openclaw_project:

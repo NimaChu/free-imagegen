@@ -9,6 +9,8 @@
   "tone": "auto",
   "decor_level": "auto",
   "emoji_policy": "auto",
+  "cover_layout": "hero_emoji_top",
+  "hero_emoji": "🤖",
   "cards": [
     {
       "kind": "article_page",

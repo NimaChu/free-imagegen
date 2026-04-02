@@ -269,6 +269,7 @@ Best for:
 
 - free illustration
 - mascots or characters
+- specific recognizable objects such as cats, lobsters, tools, or robots
 - decorative scene pages
 - agent-authored diagrams that are easier to express directly in SVG
 - any page where built-in templates would over-constrain the design
@@ -351,6 +352,7 @@ For most article-to-image sets, prefer keeping the overall visual system consist
 - mixing light and dark pages accidentally inside a `unified` series
 - overusing playful decoration on dense technical pages
 - expecting the built-in `illustration` branch to behave like a fully open-ended drawing model
+- using `illustration` for a specific recognizable object when the agent actually wants direct drawing control
 
 If the page needs true free-form SVG illustration, use `custom_svg`.
 

@@ -14,7 +14,8 @@ This skill is best for:
 - infographics and knowledge cards
 - article-to-image card sets
 - OpenClaw thumbnails and icons
-- simple stylized illustrations where editable SVG output matters
+- simple stylized illustrations as a lightweight fallback
+- direct `custom_svg` rendering when the agent wants full visual control
 
 This skill is **not** a photorealistic diffusion model. It is a local, rule-based composition engine that renders through SVG and exports PNG locally.
 
@@ -42,14 +43,23 @@ Choose the mode from the user intent.
 
 ### `illustration`
 
-Use for general drawing requests:
+Use this only as a lightweight fallback for quick stylized subject prompts.
 
-- characters
-- objects
-- scenes
-- stylized posters without dense text
+Good for:
 
-This is the default when the prompt is mostly about a subject rather than content structure.
+- abstract or poster-like subject sketches
+- quick experiments when exact object fidelity does not matter
+- simple stylized compositions without dense text
+
+Avoid relying on `illustration` when the user wants a clearly recognizable:
+
+- person
+- animal
+- object
+- mascot
+- scene with specific visual requirements
+
+For those, prefer `custom_svg` so the agent can directly author the SVG instead of being constrained by the built-in illustration branch.
 
 ### `text_cover`
 
@@ -146,6 +156,7 @@ Best for:
 
 - free illustration
 - mascots
+- specific objects like cats, lobsters, robots, tools, or products
 - decorative scene pages
 - hand-authored SVG diagrams
 
@@ -161,11 +172,12 @@ Use these defaults unless the user clearly asks otherwise.
 1. If the user gives a long article or says “turn this article into images”, prefer `--story-plan-file` when an agent can first read and plan the structure.
 2. If the request is mostly text hierarchy and mobile readability, prefer `text_cover`.
 3. If the request is explanation, comparison, workflow, grouped products, or knowledge transfer, prefer `infographic`.
-4. If the request is a person, object, or scene, prefer `illustration`.
-5. If the user wants OpenClaw assets, use `--openclaw-project`.
-6. Keep output mobile-readable whenever text density is high: fewer lines, larger text, simpler structure.
-7. For long paragraphs that should stay close to the original writing, prefer `article_page` instead of forcing every section into an infographic layout.
-8. Treat auto story generation as a draft/fallback. When quality matters, let the agent decide pagination and layout explicitly.
+4. If the request is a person, object, mascot, or scene that should be visually recognizable, prefer `custom_svg`.
+5. Use `illustration` only as a fallback for quick stylized subject sketches.
+6. If the user wants OpenClaw assets, use `--openclaw-project`.
+7. Keep output mobile-readable whenever text density is high: fewer lines, larger text, simpler structure.
+8. For long paragraphs that should stay close to the original writing, prefer `article_page` instead of forcing every section into an infographic layout.
+9. Treat auto story generation as a draft/fallback. When quality matters, let the agent decide pagination and layout explicitly.
 
 ## Recommended Commands
 

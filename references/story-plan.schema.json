@@ -19,6 +19,8 @@
     "tone": { "$ref": "#/$defs/tone" },
     "decor_level": { "$ref": "#/$defs/decorLevel" },
     "emoji_policy": { "$ref": "#/$defs/emojiPolicy" },
+    "cover_layout": { "$ref": "#/$defs/coverLayout" },
+    "hero_emoji": { "type": "string", "description": "Optional hero emoji for cover-style pages." },
     "key_numbers": {
       "type": "array",
       "items": { "type": "string" },
@@ -48,6 +50,7 @@
     "tone": { "type": "string", "enum": ["auto", "calm", "playful", "bold", "editorial"] },
     "decorLevel": { "type": "string", "enum": ["auto", "none", "low", "medium"] },
     "emojiPolicy": { "type": "string", "enum": ["auto", "none", "sparse", "expressive"] },
+    "coverLayout": { "type": "string", "enum": ["auto", "title_first", "hero_emoji_top"] },
     "pageKind": {
       "type": "string",
       "enum": [
@@ -93,7 +96,9 @@
         "accent": { "$ref": "#/$defs/accent" },
         "tone": { "$ref": "#/$defs/tone" },
         "decor_level": { "$ref": "#/$defs/decorLevel" },
-        "emoji_policy": { "$ref": "#/$defs/emojiPolicy" }
+        "emoji_policy": { "$ref": "#/$defs/emojiPolicy" },
+        "cover_layout": { "$ref": "#/$defs/coverLayout" },
+        "hero_emoji": { "type": "string" }
       },
       "required": ["kind"],
       "anyOf": [
@@ -118,6 +123,8 @@
       "title": "OpenClaw 入门图文卡组",
       "subtitle": "agent 先定分页，renderer 再稳定落版",
       "series_style": "unified",
+      "cover_layout": "hero_emoji_top",
+      "hero_emoji": "🤖",
       "cards": [
         {
           "kind": "article_page",

@@ -148,12 +148,13 @@ And update `manifest.json` if present.
 
 - Generates images from natural-language prompts
 - Uses a fully local `Prompt -> SVG -> PNG` pipeline
-- Defaults to general illustration mode for characters, objects, and scenes
+- Keeps a lightweight built-in `illustration` branch as a fallback for quick stylized subject sketches
 - Switches to `text_cover` for title-led cover requests
 - Switches to `infographic` for knowledge-card and diagram requests
 - Can transform long-form articles into multi-image card sets
 - Supports staged workflows like outline-only, prompts-only, and images-only
 - Produces delivery-ready PNGs by default, with optional SVG retention for debugging or manual editing
+- Lets the agent bypass built-in layouts entirely with `custom_svg` for full visual control
 
 ---
 
@@ -187,7 +188,7 @@ On macOS, the skill will use the best available local renderer it can find.
 
 ## Quick Start
 
-### Generate a normal illustration
+### Generate a quick fallback illustration
 
 ```bash
 python3 scripts/free_image_gen.py \
@@ -196,6 +197,10 @@ python3 scripts/free_image_gen.py \
   --width 1024 \
   --height 1280
 ```
+
+Use this path for lightweight stylized sketches only.
+
+If the page needs a clearly recognizable object, mascot, animal, or scene, prefer `custom_svg`.
 
 ### Generate a text-first cover
 
@@ -257,7 +262,7 @@ python3 scripts/free_image_gen.py \
 
 ### Render a fully agent-authored SVG page
 
-When you need true free-form illustration, let the agent author SVG directly through `custom_svg`.
+When you need true free-form illustration, or a specific recognizable object like a cat, lobster, robot, or mascot, let the agent author SVG directly through `custom_svg`.
 
 See:
 
