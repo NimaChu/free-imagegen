@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from typing import Any
 EXPORT_FALLBACK_SCRIPT = Path("/Users/chunima/.codex/skills/svg-png-cover-generator/scripts/export_svg_to_png.sh")
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
+DEFAULT_OUTPUT_DIR = REPO_ROOT.parent / "output"
 STORY_PLAN_SCHEMA_PATH = REPO_ROOT / "references" / "story-plan.schema.json"
 STORY_PLAN_TEMPLATE_PATH = REPO_ROOT / "references" / "story-plan.template.json"
 SUPPORTED_PAGE_KINDS = {
@@ -60,6 +62,28 @@ def _slugify(text: str) -> str:
 
 def _stable_int(text: str) -> int:
     return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:12], 16)
+
+
+def _timestamp_slug(prefix: str, text: str, suffix: str = "") -> str:
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    slug = _slugify(text)[:36]
+    core = f"{stamp}-{prefix}-{slug}" if slug else f"{stamp}-{prefix}"
+    return f"{core}-{suffix}" if suffix else core
+
+
+def _default_output_label(prompt: str | None, story_plan: dict[str, Any] | None = None) -> str:
+    if story_plan:
+        for key in ["title", "subtitle"]:
+            value = story_plan.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    if not prompt:
+        return "image"
+    for labels in (["标题", "主标题", "title"], ["heading", "章节"], ["副标题", "subtitle"]):
+        value = _extract_labeled_value(prompt, labels)
+        if value:
+            return value
+    return prompt
 
 
 def _is_cover_prompt(prompt: str) -> bool:
@@ -3476,7 +3500,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.openclaw_project:
             result = generate_openclaw_assets(args.openclaw_project, prompt, keep_svg=args.keep_svg)
-        elif args.story_output_dir:
+        elif args.story_output_dir or args.story_plan_file:
             story_mode = "all"
             if args.outline_only:
                 story_mode = "outline-only"
@@ -3484,9 +3508,13 @@ def main(argv: list[str] | None = None) -> int:
                 story_mode = "prompts-only"
             elif args.images_only:
                 story_mode = "images-only"
+            story_output_dir = args.story_output_dir
+            if not story_output_dir:
+                title_source = _default_output_label(prompt, story_plan=story_plan)
+                story_output_dir = str(DEFAULT_OUTPUT_DIR / _timestamp_slug("story", title_source))
             result = generate_article_story(
                 prompt,
-                args.story_output_dir,
+                story_output_dir,
                 args.width,
                 args.height,
                 strategy=args.story_strategy,
@@ -3498,8 +3526,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             output = args.output
             if not output:
-                stem = _slugify(prompt)[:48]
-                output = str(Path.cwd() / f"{stem}.png")
+                DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+                output = str(DEFAULT_OUTPUT_DIR / f"{_timestamp_slug('image', _default_output_label(prompt))}.png")
             result = generate_image(prompt, output, args.width, args.height, args.svg_output, keep_svg=args.keep_svg)
 
         print(json.dumps(result, ensure_ascii=False, indent=2))
