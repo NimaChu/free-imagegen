@@ -396,16 +396,16 @@ def _extract_labeled_value(prompt: str, labels: list[str]) -> str | None:
 
 def _strip_control_directives(text: str) -> str:
     patterns = [
-        r"(?:^|\s)(?:主题|theme)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
-        r"(?:^|\s)(?:页面密度|密度|density)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
-        r"(?:^|\s)(?:系列风格|统一程度|series-style|series_style)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
-        r"(?:^|\s)(?:页面角色|章节角色|section-role|section_role)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
-        r"(?:^|\s)(?:页面风格|风格|surface-style|style)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
-        r"(?:^|\s)(?:强调色|accent)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
-        r"(?:^|\s)(?:语气|气质|tone)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
-        r"(?:^|\s)(?:装饰密度|装饰程度|decor-level|decor_level)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
-        r"(?:^|\s)(?:表情策略|emoji-policy|emoji_policy)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
-        r"(?:^|\s)(?:封面布局|cover-layout|cover_layout)\s*[:：]\s*[A-Za-z\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:主题|theme)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:页面密度|密度|density)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:系列风格|统一程度|series-style|series_style)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:页面角色|章节角色|section-role|section_role)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:页面风格|风格|surface-style|style)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:强调色|accent)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:语气|气质|tone)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:装饰密度|装饰程度|decor-level|decor_level)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:表情策略|emoji-policy|emoji_policy)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:封面布局|cover-layout|cover_layout)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
         r"(?:^|\s)(?:主视觉表情|封面表情|hero-emoji|hero_emoji)\s*[:：]\s*[^\n]+",
     ]
     out = text
@@ -419,7 +419,7 @@ def _resolve_render_controls(prompt: str) -> dict[str, str]:
     def direct_value(labels: list[str]) -> str:
         for label in labels:
             m = re.search(
-                rf"(?:^|[\s，,；;\n]){re.escape(label)}\s*[:：]\s*([A-Za-z\u4e00-\u9fff\-]+)",
+                rf"(?:^|[\s，,；;\n]){re.escape(label)}\s*[:：]\s*([A-Za-z0-9_\u4e00-\u9fff\-]+)",
                 prompt,
                 flags=re.IGNORECASE,
             )
@@ -1246,6 +1246,8 @@ def _infer_infographic_kind(prompt: str) -> str:
     lower = prompt.lower()
     if any(token in lower for token in ["文章页", "article page", "正文页", "长文页"]):
         return "article_page"
+    if any(token in lower for token in ["机制卡", "mechanism", "核心亮点", "关键点"]):
+        return "mechanism"
     if any(token in lower for token in ["说明卡", "article note", "config note", "配置说明"]):
         return "article_note"
     if any(token in lower for token in ["文章卡", "article card", "文章排版", "长文卡片"]):
@@ -2671,9 +2673,9 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
                 max_lines=2,
             )
             checks.append(f'<rect x="{width*0.08:.2f}" y="{y:.2f}" width="{width*0.84:.2f}" height="{row_h:.2f}" rx="20" fill="{"#161D2A" if theme_dark else "#FFFFFF"}"/>')
-            checks.append(f'<circle cx="{width*0.14:.2f}" cy="{y + row_h*0.40:.2f}" r="{width*0.028:.2f}" fill="{colors[idx % len(colors)]}"/>')
             marker = "✅" if tone == "playful" and emoji_policy != "none" else "✓"
-            checks.append(_svg_text_block(width*0.14, y + row_h*0.44, [marker], max(18, int(width*0.022)), "#FFFFFF", weight=900, anchor="middle"))
+            marker_color = colors[idx % len(colors)] if marker == "✓" else None
+            checks.append(_svg_text_block(width*0.14, y + row_h*0.48, [marker], max(30, int(width*0.036)) if marker != "✓" else max(22, int(width*0.026)), marker_color or "#111111", weight=900, anchor="middle"))
             checks.append(_svg_text_block(width*0.20, y + row_h*0.42, lines, size, "#EFF3FF" if theme_dark else "#2A2F45", weight=820, line_gap=1.08))
         return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0F1320" if theme_dark else "#F5F6FC"}"/>
@@ -2998,37 +3000,37 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
             scene, before, after = _split_comparison_row(row)
             scene_lines, scene_size = _fit_body_block(
                 scene,
-                max_width_px=width * 0.22,
-                chinese_wraps=[14, 12, 10],
-                latin_wraps=[18, 16, 14],
+                max_width_px=width * 0.24,
+                chinese_wraps=[18, 16, 14],
+                latin_wraps=[22, 20, 18],
                 size_candidates=[
-                    max(21 if controls["density"] != "compact" else 20, int(width*0.025)),
-                    max(18, int(width*0.022)),
-                    max(16, int(width*0.020)),
+                    max(27 if controls["density"] != "compact" else 26, int(width*0.032)),
+                    max(24, int(width*0.028)),
+                    max(22, int(width*0.026)),
                 ],
                 max_lines=2,
             )
             before_lines, before_size = _fit_body_block(
                 before,
-                max_width_px=width * 0.22,
-                chinese_wraps=[16, 14, 12],
-                latin_wraps=[22, 20, 18],
+                max_width_px=width * 0.24,
+                chinese_wraps=[20, 18, 16],
+                latin_wraps=[26, 24, 22],
                 size_candidates=[
-                    max(19 if controls["density"] == "comfy" else 18, int(width*0.022)),
-                    max(16, int(width*0.019)),
-                    max(15, int(width*0.018)),
+                    max(25 if controls["density"] == "comfy" else 24, int(width*0.028)),
+                    max(22, int(width*0.025)),
+                    max(20, int(width*0.023)),
                 ],
                 max_lines=2,
             )
             after_lines, after_size = _fit_body_block(
                 after,
-                max_width_px=width * 0.22,
-                chinese_wraps=[16, 14, 12],
-                latin_wraps=[22, 20, 18],
+                max_width_px=width * 0.24,
+                chinese_wraps=[20, 18, 16],
+                latin_wraps=[26, 24, 22],
                 size_candidates=[
-                    max(19 if controls["density"] == "comfy" else 18, int(width*0.022)),
-                    max(16, int(width*0.019)),
-                    max(15, int(width*0.018)),
+                    max(25 if controls["density"] == "comfy" else 24, int(width*0.028)),
+                    max(22, int(width*0.025)),
+                    max(20, int(width*0.023)),
                 ],
                 max_lines=2,
             )
@@ -3049,9 +3051,9 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
   {_svg_text_block(width*0.07, title_y, comparison_title_lines, comparison_title_size, accent if not theme_dark else "#BFD0FF", weight=900, line_gap=1.04)}
   {_svg_text_block(width*0.07, subtitle_y, subtitle_lines[:2], subtitle_size, "#A6B0C5" if theme_dark else "#7E869B", weight=700, line_gap=1.08)}
   <rect x="{width*0.07:.2f}" y="{header_bar_y:.2f}" width="{width*0.86:.2f}" height="{height*0.055:.2f}" rx="18" fill="{"#25314A" if theme_dark else "#7C63D8"}"/>
-  {_svg_text_block(width*0.10, header_bar_y + height*0.035, ["场景"], max(17, int(width*0.021)), "#FFFFFF", weight=800)}
-  {_svg_text_block(width*0.34, header_bar_y + height*0.035, ["以前"], max(17, int(width*0.021)), "#FFFFFF", weight=800)}
-  {_svg_text_block(width*0.62, header_bar_y + height*0.035, ["现在"], max(17, int(width*0.021)), "#FFFFFF", weight=800)}
+  {_svg_text_block(width*0.10, header_bar_y + height*0.036, ["场景"], max(19, int(width*0.023)), "#FFFFFF", weight=800)}
+  {_svg_text_block(width*0.34, header_bar_y + height*0.036, ["以前"], max(19, int(width*0.023)), "#FFFFFF", weight=800)}
+  {_svg_text_block(width*0.62, header_bar_y + height*0.036, ["现在"], max(19, int(width*0.023)), "#FFFFFF", weight=800)}
   <g>{''.join(body)}</g>
   {_svg_text_block(width*0.50, height*0.94, footer_lines, max(14, int(width*0.018)), "#8F99AF" if theme_dark else "#9AA0B5", weight=600, anchor="middle") if footer_lines else ''}
 </svg>'''
@@ -3121,9 +3123,9 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
             nodes.append(f'<rect x="{width*0.12:.2f}" y="{y:.2f}" width="{width*0.78:.2f}" height="{card_h:.2f}" rx="22" fill="{"#161D2A" if theme_dark else "#FFFFFF"}"/>')
             nodes.append(f'<circle cx="{width*0.17:.2f}" cy="{y + card_h*0.36:.2f}" r="{width*0.038:.2f}" fill="{circle_colors[idx % len(circle_colors)]}"/>')
             nodes.append(_svg_text_block(width*0.17, y + card_h*0.39, [str(idx + 1)], max(18, int(width*0.022)), "#FFFFFF", weight=900, anchor="middle"))
-            title_y = y + max(height * 0.022, card_h * 0.18)
-            desc_y = title_y + _text_block_height(flow_title_lines, flow_title_size, 1.06) + max(height * 0.012, card_h * 0.10)
-            nodes.append(_svg_text_block(width*0.25, title_y, flow_title_lines, flow_title_size, "#F1F5FF" if theme_dark else "#22263A", weight=800, line_gap=1.06))
+            card_title_y = y + max(height * 0.022, card_h * 0.18)
+            desc_y = card_title_y + _text_block_height(flow_title_lines, flow_title_size, 1.06) + max(height * 0.012, card_h * 0.10)
+            nodes.append(_svg_text_block(width*0.25, card_title_y, flow_title_lines, flow_title_size, "#F1F5FF" if theme_dark else "#22263A", weight=800, line_gap=1.06))
             nodes.append(_svg_text_block(width*0.25, desc_y, flow_desc_lines, flow_desc_size, "#A6B0C5" if theme_dark else "#8A90A8", weight=700, line_gap=1.1))
             if idx < len(flow_specs) - 1:
                 arrow_top = y + card_h
@@ -3153,6 +3155,10 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
     subtitle_y = title_y + _text_block_height(title_lines, title_size, 1.08) + (height * 0.024 if series_unified else height * 0.02)
     badge_y = subtitle_y + _text_block_height(mechanism_subtitle_lines, subtitle_size, 1.08) + (height * 0.034 if section_role == "chapter" else height * 0.028)
     kicker_text = _visible_kicker(copy)
+    if kicker_text:
+        title_y = max(title_y, height * 0.20)
+        subtitle_y = title_y + _text_block_height(title_lines, title_size, 1.08) + (height * 0.024 if series_unified else height * 0.02)
+        badge_y = subtitle_y + _text_block_height(mechanism_subtitle_lines, subtitle_size, 1.08) + (height * 0.034 if section_role == "chapter" else height * 0.028)
     footer_lines = _footer_lines(copy)
     footer_size = max(15, int(width * 0.02))
     footer_h = _text_block_height(footer_lines, footer_size, 1.08)
@@ -3183,9 +3189,9 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <rect x="0" y="0" width="{width}" height="{height}" fill="{"#0E1320" if theme_dark else "#F5F6FC"}"/>
   {sparkles}
-  {f'<rect x="{width*0.07:.2f}" y="{height*0.08:.2f}" width="{width*0.22:.2f}" height="{height*0.036:.2f}" rx="{height*0.018:.2f}" fill="{"#222B40" if theme_dark else "#EEF2FF"}"/>{_svg_text_block(width*0.10, height*0.105, [kicker_text], max(14, int(width*0.017)), accent if theme_dark else "#6B74D8", weight=800)}' if kicker_text else ''}
+  {_svg_text_block(width*0.08, height*0.11, [kicker_text], max(15, int(width*0.018)), accent if theme_dark else "#6B74D8", weight=800) if kicker_text else ''}
   {_svg_text_block(width*0.08, title_y, title_lines, title_size, "#F2F6FF" if theme_dark else "#253044", weight=900, line_gap=1.08)}
-  {_title_emoji_svg(width*0.08, title_y, title_lines, title_size, trailing_title_emoji, width, accent if not theme_dark else "#BFD0FF", scale=1.75)}
+  {_title_emoji_svg(width*0.08, title_y, title_lines, title_size, trailing_title_emoji if len(''.join(title_lines)) <= 14 else "", width, accent if not theme_dark else "#BFD0FF", scale=1.55)}
   {_svg_text_block(width*0.08, subtitle_y, mechanism_subtitle_lines, subtitle_size, "#B7C0D5" if theme_dark else "#7E869B", weight=700, line_gap=1.08)}
   {f'<rect x="{width*0.08:.2f}" y="{badge_y:.2f}" width="{width*0.22:.2f}" height="{height*0.042:.2f}" rx="{height*0.02:.2f}" fill="{"#2B2540" if theme_dark else "#F2EEFF"}"/>{_svg_text_block(width*0.11, badge_y + height*0.028, [copy["emphasis"]], max(18, int(width*0.022)), accent if theme_dark else "#7A59E6", weight=900)}' if copy["emphasis"] else ''}
   <g>{''.join(cards)}</g>
