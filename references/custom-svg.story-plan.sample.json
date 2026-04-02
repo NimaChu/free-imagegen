@@ -1,0 +1,13 @@
+{
+  "title": "自定义 SVG 示例",
+  "strategy": "agent",
+  "series_style": "loose",
+  "cards": [
+    {
+      "kind": "custom_svg",
+      "heading": "橘猫贴纸",
+      "title": "橘猫贴纸",
+      "svg_markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1080 1440\"><defs><linearGradient id=\"bg\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\"><stop offset=\"0%\" stop-color=\"#FFF5E8\"/><stop offset=\"100%\" stop-color=\"#FFE8CC\"/></linearGradient></defs><rect width=\"1080\" height=\"1440\" fill=\"url(#bg)\"/><ellipse cx=\"540\" cy=\"1190\" rx=\"200\" ry=\"70\" fill=\"#D9A36A\" opacity=\"0.20\"/><circle cx=\"540\" cy=\"650\" r=\"235\" fill=\"#F6AE5D\"/><path d=\"M364 492 L454 314 L520 500 Z\" fill=\"#F6AE5D\"/><path d=\"M716 492 L626 314 L560 500 Z\" fill=\"#F6AE5D\"/><path d=\"M412 472 L456 382 L494 476 Z\" fill=\"#FFE0B8\" opacity=\"0.95\"/><path d=\"M668 472 L624 382 L586 476 Z\" fill=\"#FFE0B8\" opacity=\"0.95\"/><circle cx=\"456\" cy=\"618\" r=\"26\" fill=\"#33211D\"/><circle cx=\"624\" cy=\"618\" r=\"26\" fill=\"#33211D\"/><circle cx=\"446\" cy=\"608\" r=\"9\" fill=\"#FFFFFF\" opacity=\"0.8\"/><circle cx=\"614\" cy=\"608\" r=\"9\" fill=\"#FFFFFF\" opacity=\"0.8\"/><path d=\"M540 656 L500 708 H580 Z\" fill=\"#D87074\"/><path d=\"M492 730 Q540 770 588 730\" stroke=\"#A14C57\" stroke-width=\"10\" fill=\"none\" stroke-linecap=\"round\"/><path d=\"M352 692 H486\" stroke=\"#7A533A\" stroke-width=\"8\" stroke-linecap=\"round\"/><path d=\"M346 736 H482\" stroke=\"#7A533A\" stroke-width=\"8\" stroke-linecap=\"round\"/><path d=\"M594 692 H728\" stroke=\"#7A533A\" stroke-width=\"8\" stroke-linecap=\"round\"/><path d=\"M598 736 H734\" stroke=\"#7A533A\" stroke-width=\"8\" stroke-linecap=\"round\"/><text x=\"540\" y=\"1290\" text-anchor=\"middle\" font-family=\"PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif\" font-size=\"88\" font-weight=\"800\" fill=\"#8A5B2C\">喵~</text></svg>"
+    }
+  ]
+}

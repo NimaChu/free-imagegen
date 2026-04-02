@@ -6,6 +6,9 @@
   "theme": "auto",
   "density": "auto",
   "accent": "auto",
+  "tone": "auto",
+  "decor_level": "auto",
+  "emoji_policy": "auto",
   "cards": [
     {
       "kind": "article_page",
@@ -16,6 +19,7 @@
       "theme": "light",
       "density": "comfy",
       "surface_style": "editorial",
+      "tone": "calm",
       "bullets": [
         "第一段原文或改写段落。",
         "第二段原文或改写段落。",
@@ -31,6 +35,9 @@
       "theme": "dark",
       "density": "compact",
       "accent": "green",
+      "tone": "playful",
+      "decor_level": "low",
+      "emoji_policy": "sparse",
       "bullets": [
         "要点一 / 用短句描述核心价值",
         "要点二 / 一条只说一件事",
@@ -53,6 +60,12 @@
         "建议三 / 用 agent 决定分页和版式",
         "建议四 / 用 renderer 稳定落版"
       ]
+    },
+    {
+      "kind": "custom_svg",
+      "heading": "自由创作页",
+      "title": "这里是自由创作标题",
+      "svg_markup": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1080 1440\"><rect width=\"1080\" height=\"1440\" fill=\"#FFF7EE\"/><circle cx=\"540\" cy=\"640\" r=\"240\" fill=\"#F6B26B\"/><text x=\"540\" y=\"1180\" text-anchor=\"middle\" font-family=\"PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif\" font-size=\"88\" font-weight=\"800\" fill=\"#8A5B2C\">这里放 agent 自己写的 SVG</text></svg>"
     }
   ]
 }

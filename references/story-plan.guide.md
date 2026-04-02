@@ -21,6 +21,7 @@ The agent should decide:
 - which parts should stay close to the original prose
 - which parts are easier to understand as cards, lists, comparisons, or maps
 - how much the whole set should feel unified
+- whether the set should stay calm or become more playful
 
 The renderer should only do this:
 
@@ -28,6 +29,40 @@ The renderer should only do this:
 - keep images complete
 - avoid overlap and bad wrapping
 - execute the selected layout reliably
+- render playful or restrained treatment only when the plan explicitly asks for it
+- when given agent-authored SVG, preserve that SVG and only normalize canvas and export details
+
+## Optional Expressiveness Controls
+
+Use these only when they help the content.
+
+- `tone`
+  - `calm`: restrained, reading-first
+  - `playful`: allows emoji badges, lighter stickers, and friendlier rhythm
+  - `bold`: stronger contrast and punchier accents
+  - `editorial`: more magazine-like and restrained
+- `decor_level`
+  - `none`: no extra decoration
+  - `low`: a little extra texture
+  - `medium`: visible playful treatment without turning the page into a poster
+- `emoji_policy`
+  - `none`: text only
+  - `sparse`: one or two emoji accents when helpful
+  - `expressive`: more visible emoji treatment
+
+Use these controls to express intent, not to decorate everything by default.
+
+Good uses:
+
+- a summary page that should feel lighter and friendlier
+- a tool roundup that benefits from a bit more energy
+- an opening page aimed at social content rather than sober documentation
+
+Bad uses:
+
+- adding emoji to dense configuration notes
+- making every page playful in a serious technical article
+- using decoration to compensate for weak structure
 
 ## First Pass: Understand The Article
 
@@ -41,6 +76,25 @@ Before writing any cards, identify:
 
 A good `story-plan` usually follows the article's real structure instead of flattening everything into one repeated card style.
 
+## Voice Preservation
+
+The output should express the article's content directly, not comment on the article from the outside.
+
+Avoid meta phrasing like:
+
+- "文章里提到"
+- "作者认为"
+- "文中指出"
+- "这篇文章说"
+
+Prefer direct expression:
+
+- state the concept directly
+- state the evidence directly
+- state the conclusion directly
+
+Only use meta wording if the page is explicitly about the author's framing or editorial method.
+
 ## Pagination Heuristics
 
 Use page breaks when one of these happens:
@@ -52,6 +106,8 @@ Use page breaks when one of these happens:
 - a section would read better as a card than as normal prose
 
 Do not split only because a section is long. First ask whether the section should stay as an article page.
+
+When a section is explanation-heavy and still reads smoothly as prose, prefer fewer pages with stronger structure over aggressively fragmenting it.
 
 ### Good page boundaries
 
@@ -205,6 +261,30 @@ Best for:
 
 Do not turn every section opener into a `text_cover` unless the article is intentionally poster-like.
 
+### `custom_svg`
+
+Use when the agent wants full control over the visual and does not want the renderer to choose a built-in layout.
+
+Best for:
+
+- free illustration
+- mascots or characters
+- decorative scene pages
+- agent-authored diagrams that are easier to express directly in SVG
+- any page where built-in templates would over-constrain the design
+
+Provide one of:
+
+- `svg_markup`: raw SVG string authored by the agent
+- `svg_path`: absolute path to an existing SVG file
+
+Use `custom_svg` when the page should be treated as a finished SVG composition, not as text that still needs layout decisions from the renderer.
+
+For a concrete starting point, see:
+
+- `references/custom-svg-best-practices.md`
+- `references/custom-svg.story-plan.sample.json`
+
 ## Choosing `section_role`
 
 Use `section_role` to describe the job of the page, not just its position.
@@ -255,6 +335,35 @@ Good for:
 - educational card sets
 
 If unsure, `unified` is the safer default for article conversion.
+
+For most article-to-image sets, prefer keeping the overall visual system consistent.
+
+- default to one main theme family across the set
+- only switch light/dark when there is a clear editorial reason
+- if an inserted image feels semantically weak, omit it instead of forcing it
+- if the set is `unified`, mixed themes should be a deliberate exception, not the default
+
+## Common Failure Modes
+
+- describing the article from the outside instead of expressing its ideas directly
+- forcing every section into a built-in infographic template
+- inserting unrelated images just because an image is available
+- mixing light and dark pages accidentally inside a `unified` series
+- overusing playful decoration on dense technical pages
+- expecting the built-in `illustration` branch to behave like a fully open-ended drawing model
+
+If the page needs true free-form SVG illustration, use `custom_svg`.
+
+## Common Failure Modes
+
+Watch for these when writing a `story-plan.json`:
+
+- the page talks about the article instead of expressing the article's idea
+- the plan uses an image that is only loosely related to the page's message
+- the set claims `series_style=unified` but flips light/dark repeatedly without a clear reason
+- a summary page carries too much explanation instead of closing cleanly
+
+If you see one of these, revise the plan before rendering.
 
 ## Choosing Theme And Density
 

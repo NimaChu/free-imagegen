@@ -16,6 +16,9 @@
     "surface_style": { "$ref": "#/$defs/surfaceStyle" },
     "style": { "$ref": "#/$defs/surfaceStyle" },
     "accent": { "$ref": "#/$defs/accent" },
+    "tone": { "$ref": "#/$defs/tone" },
+    "decor_level": { "$ref": "#/$defs/decorLevel" },
+    "emoji_policy": { "$ref": "#/$defs/emojiPolicy" },
     "key_numbers": {
       "type": "array",
       "items": { "type": "string" },
@@ -42,6 +45,9 @@
     "sectionRole": { "type": "string", "enum": ["auto", "cover", "chapter", "body", "summary"] },
     "surfaceStyle": { "type": "string", "enum": ["auto", "soft", "card", "minimal", "editorial"] },
     "accent": { "type": "string", "enum": ["auto", "blue", "green", "warm", "rose"] },
+    "tone": { "type": "string", "enum": ["auto", "calm", "playful", "bold", "editorial"] },
+    "decorLevel": { "type": "string", "enum": ["auto", "none", "low", "medium"] },
+    "emojiPolicy": { "type": "string", "enum": ["auto", "none", "sparse", "expressive"] },
     "pageKind": {
       "type": "string",
       "enum": [
@@ -56,6 +62,7 @@
         "flow",
         "timeline",
         "article_note"
+        ,"custom_svg"
       ]
     },
     "card": {
@@ -75,18 +82,34 @@
           "description": "Body content. Keep each item concise for mobile readability." 
         },
         "image_path": { "type": "string", "description": "Absolute local image path when this page should embed a real image." },
+        "svg_markup": { "type": "string", "description": "Raw SVG markup authored by the agent. Use when the agent wants full control over the image." },
+        "svg_path": { "type": "string", "description": "Absolute local path to an existing SVG file. Use instead of svg_markup when the agent already wrote the SVG to disk." },
         "theme": { "$ref": "#/$defs/theme" },
         "density": { "$ref": "#/$defs/density" },
         "series_style": { "$ref": "#/$defs/seriesStyle" },
         "section_role": { "$ref": "#/$defs/sectionRole" },
         "surface_style": { "$ref": "#/$defs/surfaceStyle" },
         "style": { "$ref": "#/$defs/surfaceStyle" },
-        "accent": { "$ref": "#/$defs/accent" }
+        "accent": { "$ref": "#/$defs/accent" },
+        "tone": { "$ref": "#/$defs/tone" },
+        "decor_level": { "$ref": "#/$defs/decorLevel" },
+        "emoji_policy": { "$ref": "#/$defs/emojiPolicy" }
       },
       "required": ["kind"],
       "anyOf": [
         { "required": ["title"] },
         { "required": ["heading"] }
+      ],
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "custom_svg" } }, "required": ["kind"] },
+          "then": {
+            "anyOf": [
+              { "required": ["svg_markup"] },
+              { "required": ["svg_path"] }
+            ]
+          }
+        }
       ]
     }
   },

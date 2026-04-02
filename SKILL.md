@@ -135,6 +135,24 @@ Use these bundled references when an agent needs a stable output contract:
 - `references/story-plan.schema.json`
 - `references/story-plan.template.json`
 - `references/story-plan.guide.md`
+- `references/custom-svg-best-practices.md`
+- `references/custom-svg.story-plan.sample.json`
+
+### `custom_svg` (for full agent visual control)
+
+Use this when the agent wants to write the SVG directly instead of relying on built-in layouts.
+
+Best for:
+
+- free illustration
+- mascots
+- decorative scene pages
+- hand-authored SVG diagrams
+
+Recommended references:
+
+- `references/custom-svg-best-practices.md`
+- `references/custom-svg.story-plan.sample.json`
 
 ## Decision Rules
 
@@ -258,6 +276,19 @@ Good uses for a plan file:
 - the opening page should be an article page but the next page should be a mechanism card
 - one page should use dark theme while another stays light
 - the agent wants tighter or looser page density per page
+- one page should feel more playful, with a little emoji/decor treatment, while another stays restrained
+
+Per-page controls now supported in `story-plan.json`:
+
+- `theme`
+- `density`
+- `surface_style` / `style`
+- `accent`
+- `series_style`
+- `section_role`
+- `tone`
+- `decor_level`
+- `emoji_policy`
 
 Recommended page types in a plan:
 

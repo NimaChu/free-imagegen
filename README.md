@@ -113,6 +113,25 @@ To make agent integration more stable, the repo now also ships:
 - `references/story-plan.schema.json`
 - `references/story-plan.template.json`
 - `references/story-plan.guide.md`
+- `references/story-plan.agent-prompt.md`
+- `references/custom-svg-best-practices.md`
+- `references/custom-svg.story-plan.sample.json`
+
+Per-page render controls now include:
+
+- `theme`
+- `density`
+- `surface_style`
+- `accent`
+- `series_style`
+- `section_role`
+- `tone`
+- `decor_level`
+- `emoji_policy`
+
+That means the agent can decide whether a page should stay calm and editorial or become a bit more playful with emoji accents and lighter decorative treatment, while the renderer still handles clean layout and export.
+
+It also means the agent can bypass built-in layouts entirely for a page and send hand-authored SVG through `custom_svg` when full visual freedom matters more than automatic layouting.
 
 ### 4. OpenClaw Assets
 
@@ -237,6 +256,25 @@ Available story strategies:
 python3 scripts/free_image_gen.py \
   --story-plan-file /absolute/path/story-plan.json \
   --story-output-dir /absolute/path/output/article-story \
+  --width 1080 \
+  --height 1440
+```
+
+### Render a fully agent-authored SVG page
+
+When you need true free-form illustration, let the agent author SVG directly through `custom_svg`.
+
+See:
+
+- `references/custom-svg-best-practices.md`
+- `references/custom-svg.story-plan.sample.json`
+
+Then run:
+
+```bash
+python3 scripts/free_image_gen.py \
+  --story-plan-file references/custom-svg.story-plan.sample.json \
+  --story-output-dir /absolute/path/output/custom-svg-sample \
   --width 1080 \
   --height 1440
 ```
