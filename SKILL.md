@@ -16,14 +16,14 @@ This skill is best for:
 - OpenClaw thumbnails and icons
 - simple stylized illustrations where editable SVG output matters
 
-This skill is **not** a photorealistic diffusion model. It is a local, rule-based, SVG-first composition engine.
+This skill is **not** a photorealistic diffusion model. It is a local, rule-based composition engine that renders through SVG and exports PNG locally.
 
 ## When To Use It
 
 Use `free-imagegen` when the request matches one or more of these cases:
 
 - the user wants free local text-to-image generation
-- the user wants SVG output plus PNG export
+- the user wants local PNG output, with optional SVG retention when needed
 - the user wants a text cover, title card, poster, or thumbnail
 - the user wants an infographic, comparison card, flow card, QA card, map, or catalog
 - the user wants to turn an article into a sequence of image cards
@@ -115,8 +115,8 @@ Outputs can include:
 - `analysis.json`
 - `outline.md`
 - `prompts/*.md`
-- `01-cover.png/svg`
-- `02-*.png/svg` and later cards
+- `01-cover.png`
+- `02-*.png` and later cards
 
 ### `story plan` (preferred for agent workflows)
 
@@ -175,7 +175,6 @@ Use these defaults unless the user clearly asks otherwise.
 python3 scripts/free_image_gen.py \
   --prompt "长发可爱女生，清新梦幻插画风，柔和光影，细节丰富" \
   --output /absolute/path/output/image.png \
-  --svg-output /absolute/path/output/image.svg \
   --width 1024 \
   --height 1280
 ```
@@ -186,7 +185,6 @@ python3 scripts/free_image_gen.py \
 python3 scripts/free_image_gen.py \
   --prompt "文字封面，标题 AI 产品设计原则，副标题 清晰层级 高信息密度 强识别度，核心数字 07" \
   --output /absolute/path/output/text-cover.png \
-  --svg-output /absolute/path/output/text-cover.svg \
   --width 1080 \
   --height 1440
 ```
@@ -197,9 +195,18 @@ python3 scripts/free_image_gen.py \
 python3 scripts/free_image_gen.py \
   --prompt "AI 编码工作流信息图，标题 GPT-5.4 Coding Workflow，副标题 从需求到提交，核心数字 4，1. 需求理解 2. 代码实现 3. 验证测试 4. 提交发布" \
   --output /absolute/path/output/infographic.png \
-  --svg-output /absolute/path/output/infographic.svg \
   --width 1080 \
   --height 1440
+```
+
+### Keep SVG only when needed
+
+Default behavior now writes PNG only to avoid clutter.
+
+If you want source SVG files for debugging or manual editing, add:
+
+```bash
+--keep-svg
 ```
 
 ### Article to image card set

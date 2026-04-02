@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -1997,6 +1998,7 @@ def generate_article_story(
     mode: str = "all",
     story_images: list[str] | None = None,
     story_plan: dict[str, Any] | None = None,
+    keep_svg: bool = False,
 ) -> dict[str, Any]:
     story_dir = Path(output_dir).expanduser().resolve()
     story_dir.mkdir(parents=True, exist_ok=True)
@@ -2052,7 +2054,8 @@ def generate_article_story(
                         story_dir / f"{card['stem']}.png",
                         width,
                         height,
-                        story_dir / f"{card['stem']}.svg",
+                        story_dir / f"{card['stem']}.svg" if keep_svg else None,
+                        keep_svg=keep_svg,
                     )
                 )
                 continue
@@ -2062,7 +2065,8 @@ def generate_article_story(
                     story_dir / f"{card['stem']}.png",
                     width,
                     height,
-                    story_dir / f"{card['stem']}.svg",
+                    story_dir / f"{card['stem']}.svg" if keep_svg else None,
+                    keep_svg=keep_svg,
                 )
             )
 
@@ -3259,15 +3263,35 @@ def _normalize_svg_markup(svg_markup: str, width: int, height: int) -> str:
     return f"<svg{attrs}>" + markup[match.end():]
 
 
-def generate_image_from_svg_markup(svg_markup: str, output: str | Path, width: int, height: int, svg_output: str | Path | None = None) -> dict[str, Any]:
+def generate_image_from_svg_markup(
+    svg_markup: str,
+    output: str | Path,
+    width: int,
+    height: int,
+    svg_output: str | Path | None = None,
+    keep_svg: bool = False,
+) -> dict[str, Any]:
     png_path = Path(output).expanduser().resolve()
-    svg_path = Path(svg_output).expanduser().resolve() if svg_output else png_path.with_suffix(".svg")
-    svg_path.parent.mkdir(parents=True, exist_ok=True)
-    svg_path.write_text(_normalize_svg_markup(svg_markup, width, height), encoding="utf-8")
-    export_svg_to_png(svg_path, png_path, width, height)
+    normalized_svg = _normalize_svg_markup(svg_markup, width, height)
+    if svg_output:
+        svg_path = Path(svg_output).expanduser().resolve()
+        svg_path.parent.mkdir(parents=True, exist_ok=True)
+        svg_path.write_text(normalized_svg, encoding="utf-8")
+        export_svg_to_png(svg_path, png_path, width, height)
+    elif keep_svg:
+        svg_path = png_path.with_suffix(".svg")
+        svg_path.parent.mkdir(parents=True, exist_ok=True)
+        svg_path.write_text(normalized_svg, encoding="utf-8")
+        export_svg_to_png(svg_path, png_path, width, height)
+    else:
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="free-imagegen-svg-") as tmpdir:
+            svg_path = Path(tmpdir) / f"{png_path.stem}.svg"
+            svg_path.write_text(normalized_svg, encoding="utf-8")
+            export_svg_to_png(svg_path, png_path, width, height)
     return {
         "mode": "direct-svg-to-png",
-        "svg": str(svg_path),
+        "svg": str(svg_path) if (svg_output or keep_svg) else None,
         "png": str(png_path),
         "width": width,
         "height": height,
@@ -3275,19 +3299,37 @@ def generate_image_from_svg_markup(svg_markup: str, output: str | Path, width: i
     }
 
 
-def generate_image(prompt: str, output: str | Path, width: int, height: int, svg_output: str | Path | None = None) -> dict[str, Any]:
+def generate_image(
+    prompt: str,
+    output: str | Path,
+    width: int,
+    height: int,
+    svg_output: str | Path | None = None,
+    keep_svg: bool = False,
+) -> dict[str, Any]:
     png_path = Path(output).expanduser().resolve()
-    svg_path = Path(svg_output).expanduser().resolve() if svg_output else png_path.with_suffix(".svg")
-
-    svg_path.parent.mkdir(parents=True, exist_ok=True)
     svg_content = _compose_svg(prompt, width, height)
-    svg_path.write_text(svg_content, encoding="utf-8")
-    export_svg_to_png(svg_path, png_path, width, height)
+    if svg_output:
+        svg_path = Path(svg_output).expanduser().resolve()
+        svg_path.parent.mkdir(parents=True, exist_ok=True)
+        svg_path.write_text(svg_content, encoding="utf-8")
+        export_svg_to_png(svg_path, png_path, width, height)
+    elif keep_svg:
+        svg_path = png_path.with_suffix(".svg")
+        svg_path.parent.mkdir(parents=True, exist_ok=True)
+        svg_path.write_text(svg_content, encoding="utf-8")
+        export_svg_to_png(svg_path, png_path, width, height)
+    else:
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="free-imagegen-svg-") as tmpdir:
+            svg_path = Path(tmpdir) / f"{png_path.stem}.svg"
+            svg_path.write_text(svg_content, encoding="utf-8")
+            export_svg_to_png(svg_path, png_path, width, height)
 
     return {
         "mode": "local-svg-to-png",
         "prompt": prompt,
-        "svg": str(svg_path),
+        "svg": str(svg_path) if (svg_output or keep_svg) else None,
         "png": str(png_path),
         "width": width,
         "height": height,
@@ -3320,7 +3362,7 @@ def _save_manifest(path: Path, manifest: dict[str, Any]) -> None:
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def generate_openclaw_assets(project_dir: str | Path, prompt: str) -> dict[str, Any]:
+def generate_openclaw_assets(project_dir: str | Path, prompt: str, keep_svg: bool = False) -> dict[str, Any]:
     project = Path(project_dir).expanduser().resolve()
     if not project.exists():
         raise FileNotFoundError(f"Project directory not found: {project}")
@@ -3329,9 +3371,9 @@ def generate_openclaw_assets(project_dir: str | Path, prompt: str) -> dict[str, 
     assets.mkdir(parents=True, exist_ok=True)
 
     thumbnail_png = assets / "thumbnail.png"
-    thumbnail_svg = assets / "thumbnail.svg"
     icon_png = assets / "icon.png"
-    icon_svg = assets / "icon.svg"
+    thumbnail_svg = assets / "thumbnail.svg" if keep_svg else None
+    icon_svg = assets / "icon.svg" if keep_svg else None
 
     generate_image(
         prompt=f"{prompt} cover thumbnail 海报",
@@ -3339,6 +3381,7 @@ def generate_openclaw_assets(project_dir: str | Path, prompt: str) -> dict[str, 
         width=1024,
         height=576,
         svg_output=thumbnail_svg,
+        keep_svg=keep_svg,
     )
     generate_image(
         prompt=f"{prompt} icon illustration",
@@ -3346,6 +3389,7 @@ def generate_openclaw_assets(project_dir: str | Path, prompt: str) -> dict[str, 
         width=384,
         height=384,
         svg_output=icon_svg,
+        keep_svg=keep_svg,
     )
 
     manifest_path, manifest = _load_manifest(project)
@@ -3364,9 +3408,9 @@ def generate_openclaw_assets(project_dir: str | Path, prompt: str) -> dict[str, 
         "mode": "openclaw-assets-local",
         "project": str(project),
         "thumbnail_png": str(thumbnail_png),
-        "thumbnail_svg": str(thumbnail_svg),
+        "thumbnail_svg": str(thumbnail_svg) if thumbnail_svg else None,
         "icon_png": str(icon_png),
-        "icon_svg": str(icon_svg),
+        "icon_svg": str(icon_svg) if icon_svg else None,
         "manifest": str(manifest_path) if manifest_path else None,
         "manifest_updated": manifest_updated,
     }
@@ -3385,6 +3429,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--story-output-dir", help="Generate a multi-image article story set into this directory")
     parser.add_argument("--story-strategy", choices=["auto", "story", "dense", "visual"], default="auto", help="Story strategy for article-to-image sets")
     parser.add_argument("--story-image", action="append", default=[], help="Attach a real image to article story pages; repeatable")
+    parser.add_argument("--keep-svg", action="store_true", help="Keep exported SVG files alongside PNG output")
     parser.add_argument("--theme", choices=["auto", "light", "dark"], default="auto", help="Overall image theme")
     parser.add_argument("--page-density", choices=["auto", "comfy", "compact"], default="auto", help="Text spacing density")
     parser.add_argument("--series-style", choices=["auto", "loose", "unified"], default="auto", help="How strongly pages in a set should feel like one series")
@@ -3430,7 +3475,7 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         if args.openclaw_project:
-            result = generate_openclaw_assets(args.openclaw_project, prompt)
+            result = generate_openclaw_assets(args.openclaw_project, prompt, keep_svg=args.keep_svg)
         elif args.story_output_dir:
             story_mode = "all"
             if args.outline_only:
@@ -3439,13 +3484,23 @@ def main(argv: list[str] | None = None) -> int:
                 story_mode = "prompts-only"
             elif args.images_only:
                 story_mode = "images-only"
-            result = generate_article_story(prompt, args.story_output_dir, args.width, args.height, strategy=args.story_strategy, mode=story_mode, story_images=args.story_image, story_plan=story_plan)
+            result = generate_article_story(
+                prompt,
+                args.story_output_dir,
+                args.width,
+                args.height,
+                strategy=args.story_strategy,
+                mode=story_mode,
+                story_images=args.story_image,
+                story_plan=story_plan,
+                keep_svg=args.keep_svg,
+            )
         else:
             output = args.output
             if not output:
                 stem = _slugify(prompt)[:48]
                 output = str(Path.cwd() / f"{stem}.png")
-            result = generate_image(prompt, output, args.width, args.height, args.svg_output)
+            result = generate_image(prompt, output, args.width, args.height, args.svg_output, keep_svg=args.keep_svg)
 
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0

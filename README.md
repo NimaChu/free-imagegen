@@ -2,14 +2,14 @@
 
 A fully local image engine for OpenClaw, Codex, and content workflows.
 
-`Free ImageGen` turns prompts or long-form text into editable SVG artwork and export-ready PNGs without calling any online image API.
+`Free ImageGen` turns prompts or long-form text into locally rendered PNGs without calling any online image API, and can optionally preserve editable SVG source when needed.
 
 It is built for people who want something practical, cheap, and controllable:
 
 - no OpenAI image API
 - no hosted text-to-image service
 - no per-image cost
-- editable `.svg` source files
+- optional editable `.svg` source files when you explicitly keep them
 - mobile-first text covers and infographic cards
 - article-to-image card set workflows for OpenClaw
 
@@ -25,7 +25,7 @@ This repo is optimized for something else:
 - **knowledge cards and Xiaohongshu-style infographic layouts**
 - **turning articles into a sequence of image cards**
 - **OpenClaw thumbnails and icons generated locally**
-- **SVG-first output that stays editable**
+- **a local SVG-based renderer with optional editable source retention**
 
 The pipeline is simple and deliberate:
 
@@ -137,9 +137,7 @@ It also means the agent can bypass built-in layouts entirely for a page and send
 
 It can generate:
 
-- `assets/thumbnail.svg`
 - `assets/thumbnail.png`
-- `assets/icon.svg`
 - `assets/icon.png`
 
 And update `manifest.json` if present.
@@ -155,7 +153,7 @@ And update `manifest.json` if present.
 - Switches to `infographic` for knowledge-card and diagram requests
 - Can transform long-form articles into multi-image card sets
 - Supports staged workflows like outline-only, prompts-only, and images-only
-- Produces editable SVG source files and delivery-ready PNGs
+- Produces delivery-ready PNGs by default, with optional SVG retention for debugging or manual editing
 
 ---
 
@@ -195,7 +193,6 @@ On macOS, the skill will use the best available local renderer it can find.
 python3 scripts/free_image_gen.py \
   --prompt "长发可爱女生，清新梦幻插画风，柔和光影，细节丰富" \
   --output /absolute/path/output/cute-girl.png \
-  --svg-output /absolute/path/output/cute-girl.svg \
   --width 1024 \
   --height 1280
 ```
@@ -206,7 +203,6 @@ python3 scripts/free_image_gen.py \
 python3 scripts/free_image_gen.py \
   --prompt "文字封面，标题 AI 产品设计原则，副标题 清晰层级 高信息密度 强识别度，核心数字 07" \
   --output /absolute/path/output/text-cover.png \
-  --svg-output /absolute/path/output/text-cover.svg \
   --width 1080 \
   --height 1440
 ```
@@ -217,7 +213,6 @@ python3 scripts/free_image_gen.py \
 python3 scripts/free_image_gen.py \
   --prompt "AI 编码工作流信息图，标题 GPT-5.4 Coding Workflow，副标题 从需求到提交，核心数字 4，1. 需求理解 2. 代码实现 3. 验证测试 4. 提交发布" \
   --output /absolute/path/output/workflow-infographic.png \
-  --svg-output /absolute/path/output/workflow-infographic.svg \
   --width 1080 \
   --height 1440
 ```
@@ -235,10 +230,10 @@ python3 scripts/free_image_gen.py \
 
 This writes outputs like:
 
-- `01-cover.png/svg`
-- `02-*.png/svg`
-- `03-*.png/svg`
-- `04-*.png/svg`
+- `01-cover.png`
+- `02-*.png`
+- `03-*.png`
+- `04-*.png`
 - `analysis.json`
 - `outline.md`
 - `prompts/*.md`
@@ -277,6 +272,16 @@ python3 scripts/free_image_gen.py \
   --story-output-dir /absolute/path/output/custom-svg-sample \
   --width 1080 \
   --height 1440
+```
+
+### Keep SVG only when you need it
+
+By default, the tool now keeps your output directory clean and writes PNG only.
+
+If you want the source SVG files too, add:
+
+```bash
+--keep-svg
 ```
 
 ### Generate OpenClaw assets
