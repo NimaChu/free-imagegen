@@ -1,114 +1,291 @@
 # Free ImageGen
 
-A fully local image engine for OpenClaw, Codex, and content workflows.
+一个 **免 API、没硬件门槛**、更适合中文内容工作流的本地生图技能。
 
-`Free ImageGen` turns prompts or long-form text into locally rendered PNGs without calling any online image API, and can optionally preserve editable SVG source when needed.
+不用 GPU，不用云端图片服务，不用图片 API，也能直接生成：
 
-It is built for people who want something practical, cheap, and controllable:
+- 📱 小红书封面
+- 📊 小红书信息图 / 知识卡
+- 📰 飞书 / 公众号文章图文卡组
+- 🦞 OpenClaw 原生支持
 
-- no OpenAI image API
-- no hosted text-to-image service
-- no per-image cost
-- optional editable `.svg` source files when you explicitly keep them
-- mobile-first text covers and infographic cards
-- article-to-image card set workflows for OpenClaw
+如果你想做的是“内容表达型图片”，而不是写实大模型绘画，这个技能会比很多扩散模型更顺手。
 
 ---
 
-## Why It Feels Different
+## 它和扩散模型有什么不一样？
 
-Most AI image tools are optimized for photorealistic novelty.
+大多数文生图工具，强在：
 
-This repo is optimized for something else:
+- 写实感
+- 氛围感
+- 视觉奇观
+- 一句话生成“看起来很厉害”的图
 
-- **text-heavy visuals that still read well on a phone**
-- **knowledge cards and Xiaohongshu-style infographic layouts**
-- **turning articles into a sequence of image cards**
-- **OpenClaw thumbnails and icons generated locally**
-- **a local SVG-based renderer with optional editable source retention**
+`Free ImageGen` 走的是另一条路：
 
-The pipeline is simple and deliberate:
+- ✅ **免费**：不按张收费，不走在线图片 API
+- ✅ **纯本地**：更适合隐私、可控、低成本工作流
+- ✅ **没硬件门槛**：不要求高配 GPU，不靠本地大模型显卡推理
+- ✅ **中文友好**：中英混排、中文标题、手机阅读都更稳
+- ✅ **自由度高**：agent 可以先判断分页、版式、风格，再交给 skill 执行
+- ✅ **内容导向**：更适合封面、信息图、图文卡组，而不是随机生成一张“好看图”
 
-```text
-Prompt / Article -> structured layout -> SVG -> local PNG export
+如果你要的是：
+
+- 小红书封面
+- 小红书干货图
+- 飞书 / 公众号文章转图片
+- OpenClaw 的图文内容页
+- 一整套由 agent 规划好的视觉卡组
+
+那它通常会比扩散模型更稳、更便宜，也更适合中文内容生产。✨
+
+---
+
+## 先说清楚：创意来自哪里？
+
+这套技能不会凭空替你变出“好创意”。
+
+更准确地说：
+
+- 🧠 **创意来自人类**
+- 🤖 **表达方案取决于 agent**
+- 🛠️ **最终落图质量，取决于 agent 对内容的理解、判断和设计能力**
+- 📦 **skill 负责把这些判断稳定渲染出来**
+
+也就是说，它的价值不在“自己很聪明”，而在于：
+
+- 不限制 agent 发挥
+- 不把版式搞乱
+- 不把中文弄坏
+- 不要求额外硬件和图片 API
+
+如果 agent 很强，这套技能会很强。
+如果 agent 判断一般，这套技能也不会替它“脑补成神图”。
+
+这反而是它很适合 OpenClaw 的原因：
+
+- 判断交给 agent
+- 稳定执行交给 renderer
+
+---
+
+## 推荐使用场景
+
+### 📱 1. 小红书封面
+
+适合做：
+
+- 大标题封面
+- 热点观点封面
+- 工具推荐封面
+- 带大表情主视觉的封面
+
+特点：
+
+- 手机端可读性优先
+- 标题层级清楚
+- 中文更稳
+- 支持更像小红书的内容表达，而不是“海报味太重”
+
+### 📊 2. 小红书信息图 / 知识卡
+
+适合做：
+
+- 机制卡
+- 对比卡
+- 清单卡
+- 工作流卡
+- 产品地图
+- 工具盘点
+- QA 卡
+
+这类图的核心不是“画得多花”，而是：
+
+- 一眼看懂
+- 手机上读得舒服
+- 适合收藏、转发、继续讲述
+
+### 📰 3. 一篇文章拆成一整套图片
+
+这是它最强的场景之一。
+
+适合：
+
+- 飞书文章
+- 公众号文章
+- 长笔记
+- 采访整理
+- AI 工具解读
+- 产品更新说明
+
+你可以让 agent：
+
+- 先读完整篇文章
+- 决定怎么分页
+- 决定哪页保留原文结构
+- 决定哪页转成清单 / 机制卡 / 对比卡
+- 决定整套图的统一风格
+
+最后输出一整套图，而不是一张孤零零的图。🚀
+
+### 🎨 4. 自由创作图案 / SVG 页面
+
+如果你不想被内置版式限制，也可以让 agent 直接自由发挥。
+
+适合：
+
+- 小动物
+- 吉祥物
+- 贴纸风图案
+- 单页装饰插图
+- 特定主题 SVG 设计
+
+这条路的好处是：
+
+- skill 不替 agent 乱做设计决定
+- agent 可以自己写出想要的画面
+- renderer 负责稳定导出
+
+---
+
+## 为什么它适合 OpenClaw / Agent 工作流？
+
+因为它的分工很清楚：
+
+- 👤 用户：给内容、给目标、给风格方向
+- 🤖 agent：负责理解文章、判断分页、决定版式和表达方式
+- 🛠️ skill：负责稳定渲染、本地导出、不乱、不重叠、不乱码
+
+很多图片工具的问题是：
+
+- 要么自由度太低，只会套模板
+- 要么自由度太高，但不稳定
+
+`Free ImageGen` 想做的是中间那条路：
+
+- 让 agent 负责思考
+- 让 renderer 负责执行
+
+---
+
+## Quick Start
+
+### ⚡ 1. 快速做一张封面图
+
+```bash
+python3 scripts/free_image_gen.py \
+  --prompt "文字封面，标题 AI 产品设计原则，副标题 清晰层级 高识别度，主题：light，封面布局：hero_emoji_top，主视觉表情：💡" \
+  --output /absolute/path/output/cover.png \
+  --width 1080 \
+  --height 1440
 ```
 
-This means the skill behaves more like a **programmatic design engine** than a model-backed “black box” image generator.
+### 🧠 2. 快速做一张信息图
+
+```bash
+python3 scripts/free_image_gen.py \
+  --prompt "信息图 机制卡 角标：三个关键点 标题：AI Agent 为什么突然火了 副标题：不是模型更强了，而是入口和体验变了 1. 门槛更低 2. 分发更广 3. 商业化更真实" \
+  --output /absolute/path/output/infographic.png \
+  --width 1080 \
+  --height 1440
+```
+
+### 🧾 3. 给一篇文章，直接生成一整套图片
+
+```bash
+python3 scripts/free_image_gen.py \
+  --prompt-file /absolute/path/article.md \
+  --story-output-dir /absolute/path/output/article-story \
+  --story-strategy auto \
+  --width 1080 \
+  --height 1440
+```
+
+适合先快速打草稿，看看自动拆页效果。
+
+### 🪄 4. 最推荐：让 agent 自由会话后生成整套图片
+
+这是最能发挥这套技能能力的方式。
+
+你可以直接对 agent 说：
+
+```text
+读完这篇文章，然后自己判断怎么分页、每页该用什么版式和风格。
+我希望最终输出一套适合小红书发布的图片：
+- 要有封面
+- 内容忠于原文，不要写“文章里提到”这种元话语
+- 该保留文章结构的页就保留
+- 该转成机制卡、清单卡、对比卡的页就转
+- 整体风格统一，手机阅读优先
+
+先产出 story-plan.json，再调用 free-imagegen 渲染整套图片。
+```
+
+这条路的好处是：
+
+- ✨ 更像 agent 在设计，而不是脚本在乱猜
+- ✨ 更适合长文和复杂内容
+- ✨ 更容易做出真正能发的小红书图文卡组
 
 ---
 
-## Best At
+## 它特别适合什么类型的内容？
 
-### 1. Text Covers
+最适合：
 
-Use it for:
+- 中文标题很重的封面
+- 知识型内容
+- 工具盘点
+- 工作流拆解
+- AI 产品观察
+- 文章转图文卡组
+- OpenClaw / Agent 相关内容表达
 
-- Xiaohongshu-style title cards
-- text-first thumbnails
-- strong headline covers
-- bold short-form content visuals
+不太适合：
 
-Examples:
+- 写实摄影感图片
+- 扩散模型那种细节丰富的自由绘画
+- 局部重绘、抠图、修图
 
-- `文字封面，标题 AI 产品设计原则，副标题 清晰层级 高信息密度 强识别度，核心数字 07`
-- `title card about vibe coding, big headline, clean mobile-first layout`
+一句话说：
 
-### 2. Knowledge Cards / Infographics
+> 它更像一个面向中文内容表达的本地设计引擎，而不是一个追求视觉幻觉的扩散模型。
 
-Use it for:
+---
 
-- mechanism cards
-- comparison cards
-- flow diagrams
-- product maps
-- tool catalogs
-- QA-style knowledge cards
+## 关于自由度
 
-The current infographic engine can automatically switch among layouts like:
+这套技能不是“只能套模板”。
 
-- `mechanism`
-- `comparison`
-- `flow`
-- `qa`
-- `timeline`
-- `catalog`
-- `map`
+你可以：
 
-### 3. Article to Image Card Sets
+- 用内置版式快速做封面和信息图
+- 让 agent 先规划整套图的分页和风格
+- 直接让 agent 写 `custom_svg` 做自由创作
 
-This is the most important workflow for OpenClaw.
+所以它的自由度来源不是“乱生成”，而是：
 
-Give it a long article, and it can generate:
+- 有结构时能稳
+- 需要自由时也能放开
 
-- a cover card
-- announcement cards
-- data cards
-- explanation cards
-- section-based infographic cards
+---
 
-It also writes:
+## 输出行为
 
-- `analysis.json`
-- `outline.md`
-- `prompts/*.md`
+默认行为已经尽量收干净了：
 
-So the workflow is inspectable and reusable instead of being a one-shot black box.
+- 默认只输出 `PNG`
+- 默认不额外保存 `.svg`
+- 默认命名更整洁
+- 想保留 SVG 源文件时，再显式加：`--keep-svg`
 
-### 3.5 Agent-Planned Story Rendering
+---
 
-This is now the recommended workflow when you already have an agent that can read the article well.
+## 给 Agent 的接入资料
 
-Instead of forcing the renderer to guess every page break and layout, let the agent decide:
-
-- how many pages to make
-- which paragraphs belong together
-- which pages should stay as article-style prose
-- which pages should become `mechanism`, `qa`, `checklist`, `catalog`, `comparison`, `map`, `flow`, or `timeline`
-- which pages should use light or dark styling
-
-Then render that plan directly with `--story-plan-file`.
-
-To make agent integration more stable, the repo now also ships:
+如果你想稳定接进 OpenClaw / Codex agent，优先看这些：
 
 - `references/story-plan.schema.json`
 - `references/story-plan.template.json`
@@ -117,425 +294,24 @@ To make agent integration more stable, the repo now also ships:
 - `references/custom-svg-best-practices.md`
 - `references/custom-svg.story-plan.sample.json`
 
-Per-page render controls now include:
+这几份文件的目标不是限制 agent，恰恰相反：
 
-- `theme`
-- `density`
-- `surface_style`
-- `accent`
-- `series_style`
-- `section_role`
-- `tone`
-- `decor_level`
-- `emoji_policy`
-
-That means the agent can decide whether a page should stay calm and editorial or become a bit more playful with emoji accents and lighter decorative treatment, while the renderer still handles clean layout and export.
-
-It also means the agent can bypass built-in layouts entirely for a page and send hand-authored SVG through `custom_svg` when full visual freedom matters more than automatic layouting.
-
-### 4. OpenClaw Assets
-
-It can generate:
-
-- `assets/thumbnail.png`
-- `assets/icon.png`
-
-And update `manifest.json` if present.
+- 帮 agent 保持自由判断
+- 同时让输出结构足够稳
 
 ---
 
-## What It Does
-
-- Generates images from natural-language prompts
-- Uses a fully local `Prompt -> SVG -> PNG` pipeline
-- Keeps a lightweight built-in `illustration` branch as a fallback for quick stylized subject sketches
-- Switches to `text_cover` for title-led cover requests
-- Switches to `infographic` for knowledge-card and diagram requests
-- Can transform long-form articles into multi-image card sets
-- Supports staged workflows like outline-only, prompts-only, and images-only
-- Produces delivery-ready PNGs by default, with optional SVG retention for debugging or manual editing
-- Lets the agent bypass built-in layouts entirely with `custom_svg` for full visual control
-
----
-
-## Project Structure
-
-```text
-SKILL.md
-agents/openai.yaml
-references/providers.md
-scripts/free_image_gen.py
-scripts/free_image_http_service.py
-```
-
----
-
-## Requirements
-
-The generator itself is Python-based, but PNG export needs a local SVG renderer.
-
-Supported renderers, in priority order:
-
-1. `rsvg-convert`
-2. `inkscape`
-3. `qlmanage`
-4. `sips`
-5. `magick`
-
-On macOS, the skill will use the best available local renderer it can find.
-
----
-
-## Quick Start
-
-### Generate a quick fallback illustration
-
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt "长发可爱女生，清新梦幻插画风，柔和光影，细节丰富" \
-  --output /absolute/path/output/cute-girl.png \
-  --width 1024 \
-  --height 1280
-```
-
-Use this path for lightweight stylized sketches only.
-
-If the page needs a clearly recognizable object, mascot, animal, or scene, prefer `custom_svg`.
-
-### Generate a text-first cover
-
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt "文字封面，标题 AI 产品设计原则，副标题 清晰层级 高信息密度 强识别度，核心数字 07" \
-  --output /absolute/path/output/text-cover.png \
-  --width 1080 \
-  --height 1440
-```
-
-### Generate an infographic
-
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt "AI 编码工作流信息图，标题 GPT-5.4 Coding Workflow，副标题 从需求到提交，核心数字 4，1. 需求理解 2. 代码实现 3. 验证测试 4. 提交发布" \
-  --output /absolute/path/output/workflow-infographic.png \
-  --width 1080 \
-  --height 1440
-```
-
-### Turn an article into a card set
-
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt-file /absolute/path/article.txt \
-  --story-output-dir /absolute/path/output/article-story \
-  --story-strategy dense \
-  --width 1080 \
-  --height 1440
-```
-
-This writes outputs like:
-
-- `01-cover.png`
-- `02-*.png`
-- `03-*.png`
-- `04-*.png`
-- `analysis.json`
-- `outline.md`
-- `prompts/*.md`
-
-Available story strategies:
-
-- `auto`
-- `story`
-- `dense`
-- `visual`
-
-### Render from an agent-authored story plan
-
-```bash
-python3 scripts/free_image_gen.py \
-  --story-plan-file /absolute/path/story-plan.json \
-  --story-output-dir /absolute/path/output/article-story \
-  --width 1080 \
-  --height 1440
-```
-
-### Render a fully agent-authored SVG page
-
-When you need true free-form illustration, or a specific recognizable object like a cat, lobster, robot, or mascot, let the agent author SVG directly through `custom_svg`.
-
-See:
-
-- `references/custom-svg-best-practices.md`
-- `references/custom-svg.story-plan.sample.json`
-
-Then run:
-
-```bash
-python3 scripts/free_image_gen.py \
-  --story-plan-file references/custom-svg.story-plan.sample.json \
-  --story-output-dir /absolute/path/output/custom-svg-sample \
-  --width 1080 \
-  --height 1440
-```
-
-### Keep SVG only when you need it
-
-By default, the tool now keeps your output directory clean and writes PNG only.
-
-If you want the source SVG files too, add:
-
-```bash
---keep-svg
-```
-
-### Generate OpenClaw assets
-
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt "space heist arcade lobster game" \
-  --openclaw-project /absolute/path/to/your-openclaw-app
-```
-
----
-
-## Staged Workflow
-
-If you want a more production-like content workflow, you can split the pipeline into stages.
-
-Recommended order for article work:
-
-1. agent reads the full article
-2. agent writes `story-plan.json`
-3. renderer outputs the final pages
-
-Auto story generation still exists, but it should be treated as a draft or fallback when no explicit plan is available.
-
-### Generate analysis + outline + prompts only
-
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt-file /absolute/path/article.txt \
-  --story-output-dir /absolute/path/output/article-story \
-  --prompts-only
-```
-
-### Generate images from an existing story workflow
-
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt-file /absolute/path/article.txt \
-  --story-output-dir /absolute/path/output/article-story \
-  --images-only
-```
-
-This structure makes it easier to:
-
-- inspect extracted sections
-- tweak prompts card by card
-- regenerate later without repeating the whole pipeline
-
----
-
-## Render Controls
-
-The renderer now exposes lightweight controls so the agent can steer the look without changing code.
-
-Available global CLI controls:
-
-- `--theme auto|light|dark`
-- `--page-density auto|comfy|compact`
-- `--surface-style auto|soft|card|minimal|editorial`
-- `--accent auto|blue|green|warm|rose`
-
-The same controls can be set per page inside `story-plan.json`:
-
-- `theme`
-- `density`
-- `series_style`
-- `section_role`
-- `surface_style` or `style`
-- `accent`
-
-This makes it possible to do things like:
-
-- keep the cover dark but the detail pages light
-- make list-heavy pages compact
-- make reading-heavy pages comfy
-- use different accent colors for different sections
-- keep a whole card set loose or unified
-- mark a page as `chapter`, `body`, or `summary` so the renderer adjusts hierarchy without inventing its own editorial opinion
-- preserve article pages as prose while rendering explanatory pages as cards
-
-Additional agent-first controls:
-
-- `series_style: auto | loose | unified`
-- `section_role: auto | cover | chapter | body | summary`
-
-These are especially useful in `story-plan.json`, where the agent can decide:
-
-- which pages should feel like strong section openers
-- which pages should read like normal article pages
-- which pages should feel like closing / takeaway cards
-- how much visual consistency to keep across the whole set
-
-Currently, these controls are wired into:
-
-- `article_page`
-- `checklist`
-- `mechanism`
-- `catalog`
-- `qa`
-- `comparison`
-- `map`
-- `flow`
-- `timeline`
-
-That keeps the division of labor clean:
-
-- the agent decides pagination, page role, and visual intent
-- the renderer executes the layout reliably
-
-If a `story-plan.json` is malformed, the CLI now fails fast with a clear validation error and points the agent to the bundled schema and template.
-
----
-
-## Prompting Tips
-
-### For Illustrations
-
-Describe:
-
-- subject
-- mood
-- palette
-- lighting
-- detail level
-
-Example:
-
-- `长发可爱女生，清新梦幻插画风，柔和光影，细节丰富`
-
-### For Text Covers
-
-Say explicitly:
-
-- `文字封面`
-- `text cover`
-- `title card`
-
-Then include:
-
-- title
-- subtitle
-- key number if any
-- tone or aesthetic hints
-
-### For Infographics
-
-Include the structure directly in the prompt whenever possible:
-
-- title
-- subtitle
-- highlighted number
-- bullets / steps / comparisons / grouped items
-
-### For Article-to-Image Workflows
-
-Best input format:
-
-- plain text body
-- headings preserved
-- bullet lists preserved
-- tables preserved as text
-- original embedded image placeholders removed
-
-If you already know the content style, guide it with:
-
-- `--story-strategy story`
-- `--story-strategy dense`
-- `--story-strategy visual`
-
-If quality matters more than speed, prefer `story-plan.json` over relying only on automatic splitting.
-
----
-
-## HTTP Service
-
-Start the local wrapper:
-
-```bash
-python3 scripts/free_image_http_service.py --host 127.0.0.1 --port 8787
-```
-
-Health check:
-
-```bash
-curl http://127.0.0.1:8787/health
-```
-
-Generate one image:
-
-```bash
-curl -X POST http://127.0.0.1:8787/generate \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt": "长发可爱女生，清新梦幻插画风，柔和光影，细节丰富",
-    "width": 1024,
-    "height": 1280,
-    "output": "/absolute/path/output/cute-girl.png",
-    "svg_output": "/absolute/path/output/cute-girl.svg"
-  }'
-```
-
-Generate OpenClaw assets:
-
-```bash
-curl -X POST http://127.0.0.1:8787/openclaw-assets \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt": "space lobster game cover",
-    "project": "/absolute/path/to/openclaw-project"
-  }'
-```
-
----
-
-## What This Is Not
-
-Being honest about the boundaries makes this skill easier to use well.
-
-This is **not**:
-
-- a photorealistic model-backed image generator
-- a diffusion model replacement
-- a browser screenshot pipeline
-- an online hosted rendering service
-
-It is a **local, rule-based, SVG-first composition engine**.
-
-That tradeoff is exactly why it is:
-
-- cheap to run
-- inspectable
-- editable
-- predictable
-- easy to adapt for content systems like OpenClaw
-
----
-
-## Current Limitations
-
-- Visual quality is strongest for text covers, infographics, product maps, and stylized compositions
-- Illustration mode is still stylized and rule-based rather than painterly or photorealistic
-- Article summarization is heuristic and works best on clearly structured writing
-- Complex content can still require prompt cleanup for the best results
-- Final PNG quality depends partly on the local SVG renderer available on the machine
-
----
-
-## License
-
-No license file has been added yet.
-
-If you want this repo to be reused more widely, adding an explicit license is a good next step.
+## 一句话总结
+
+如果你想要的是：
+
+- 免费
+- 纯本地
+- 免 API
+- 没硬件门槛
+- 中文友好
+- 小红书友好
+- agent 可控
+- 能把文章变成一整套图
+
+那这套技能就是为这个场景做的。🦞
