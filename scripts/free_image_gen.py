@@ -982,6 +982,13 @@ def _extract_trailing_phrase(text: str) -> tuple[str, str]:
 
 
 def _hero_cover_title_lines(text: str, width: int) -> tuple[list[str], int]:
+    explicit_lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(explicit_lines) >= 2:
+        size_candidates = [max(68, int(width * 0.088)), max(62, int(width * 0.082)), max(56, int(width * 0.076))]
+        for candidate_size in size_candidates:
+            if all(_estimate_line_width(line, candidate_size) <= width * 0.80 for line in explicit_lines):
+                return explicit_lines[:3], candidate_size
+        return explicit_lines[:3], size_candidates[-1]
     head, tail = _extract_trailing_phrase(text)
     size_candidates = [max(68, int(width * 0.088)), max(62, int(width * 0.082)), max(56, int(width * 0.076))]
     if tail and re.search(r"[\u4e00-\u9fff]", head):
