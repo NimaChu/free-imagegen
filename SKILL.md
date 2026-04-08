@@ -308,6 +308,9 @@ Per-page controls now supported in `story-plan.json`:
 - `tone`
 - `decor_level`
 - `emoji_policy`
+- `emoji_render_mode`
+
+Use `emoji_render_mode: "svg"` when the target environment is Linux/headless and emoji need to stay colorful and stable.
 
 Recommended page types in a plan:
 

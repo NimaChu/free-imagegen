@@ -47,7 +47,144 @@ SUPPORTED_ACCENTS = {"auto", "blue", "green", "warm", "rose"}
 SUPPORTED_TONES = {"auto", "calm", "playful", "bold", "editorial"}
 SUPPORTED_DECOR_LEVELS = {"auto", "none", "low", "medium"}
 SUPPORTED_EMOJI_POLICIES = {"auto", "none", "sparse", "expressive"}
+SUPPORTED_EMOJI_RENDER_MODES = {"auto", "font", "svg", "mono", "none"}
 SUPPORTED_COVER_LAYOUTS = {"auto", "title_first", "hero_emoji_top"}
+CURRENT_EMOJI_RENDER_MODE = "font"
+
+
+def _resolved_emoji_render_mode(value: str = "auto") -> str:
+    if value in {"font", "svg", "mono", "none"}:
+        return value
+    return "svg" if sys.platform.startswith("linux") else "font"
+
+
+def _set_current_emoji_render_mode(value: str = "auto") -> str:
+    global CURRENT_EMOJI_RENDER_MODE
+    CURRENT_EMOJI_RENDER_MODE = _resolved_emoji_render_mode(value)
+    return CURRENT_EMOJI_RENDER_MODE
+
+
+def _normalize_emoji_token(value: str) -> str:
+    return value.replace("\ufe0f", "").replace("\u200d", "").strip()
+
+
+def _emoji_svg_markup(emoji: str, x: float, baseline_y: float, size: int, anchor: str = "start") -> str:
+    token = _normalize_emoji_token(emoji)
+    if not token:
+        return ""
+    width = float(size)
+    left = x - width / 2 if anchor == "middle" else x
+    top = baseline_y - size * 0.84
+    cx = left + width * 0.5
+    cy = top + size * 0.5
+    stroke = max(2.0, size * 0.035)
+
+    def wrap(inner: str) -> str:
+        return f'<g transform="translate({left:.2f},{top:.2f})">{inner}</g>'
+
+    if token in {"✅", "☑"}:
+        return wrap(
+            f'<rect x="{width*0.12:.2f}" y="{size*0.12:.2f}" width="{width*0.76:.2f}" height="{size*0.76:.2f}" rx="{size*0.18:.2f}" fill="#43C56B"/>'
+            f'<path d="M {width*0.28:.2f} {size*0.52:.2f} L {width*0.43:.2f} {size*0.67:.2f} L {width*0.73:.2f} {size*0.34:.2f}" '
+            f'stroke="#FFFFFF" stroke-width="{stroke*2.0:.2f}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+        )
+    if token in {"❓", "❔"}:
+        return wrap(
+            f'<circle cx="{width*0.50:.2f}" cy="{size*0.44:.2f}" r="{size*0.30:.2f}" fill="#7C63D8"/>'
+            f'<text x="{width*0.50:.2f}" y="{size*0.58:.2f}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{size*0.50:.2f}" font-weight="900" fill="#FFFFFF">?</text>'
+        )
+    if token == "⚠":
+        return wrap(
+            f'<path d="M {width*0.50:.2f} {size*0.12:.2f} L {width*0.88:.2f} {size*0.84:.2f} L {width*0.12:.2f} {size*0.84:.2f} Z" fill="#FFC83D"/>'
+            f'<rect x="{width*0.46:.2f}" y="{size*0.32:.2f}" width="{width*0.08:.2f}" height="{size*0.24:.2f}" rx="{size*0.02:.2f}" fill="#5A4300"/>'
+            f'<circle cx="{width*0.50:.2f}" cy="{size*0.68:.2f}" r="{size*0.04:.2f}" fill="#5A4300"/>'
+        )
+    if token == "💡":
+        return wrap(
+            f'<circle cx="{width*0.50:.2f}" cy="{size*0.38:.2f}" r="{size*0.24:.2f}" fill="#FFD95A"/>'
+            f'<rect x="{width*0.38:.2f}" y="{size*0.56:.2f}" width="{width*0.24:.2f}" height="{size*0.12:.2f}" rx="{size*0.04:.2f}" fill="#FDBA2D"/>'
+            f'<rect x="{width*0.40:.2f}" y="{size*0.68:.2f}" width="{width*0.20:.2f}" height="{size*0.09:.2f}" rx="{size*0.03:.2f}" fill="#6B5A2B"/>'
+            f'<path d="M {width*0.50:.2f} {size*0.04:.2f} L {width*0.50:.2f} {size*0.14:.2f} M {width*0.20:.2f} {size*0.18:.2f} L {width*0.28:.2f} {size*0.24:.2f} M {width*0.80:.2f} {size*0.18:.2f} L {width*0.72:.2f} {size*0.24:.2f}" stroke="#FFCC33" stroke-width="{stroke:.2f}" stroke-linecap="round"/>'
+        )
+    if token == "🚀":
+        return wrap(
+            f'<path d="M {width*0.56:.2f} {size*0.12:.2f} C {width*0.74:.2f} {size*0.22:.2f} {width*0.78:.2f} {size*0.44:.2f} {width*0.62:.2f} {size*0.62:.2f} L {width*0.42:.2f} {size*0.82:.2f} L {width*0.32:.2f} {size*0.72:.2f} L {width*0.52:.2f} {size*0.52:.2f} C {width*0.70:.2f} {size*0.36:.2f} {width*0.66:.2f} {size*0.18:.2f} {width*0.56:.2f} {size*0.12:.2f} Z" fill="#E9EEF9"/>'
+            f'<circle cx="{width*0.57:.2f}" cy="{size*0.36:.2f}" r="{size*0.08:.2f}" fill="#5BA9FF"/>'
+            f'<path d="M {width*0.36:.2f} {size*0.70:.2f} L {width*0.22:.2f} {size*0.78:.2f} L {width*0.32:.2f} {size*0.60:.2f} Z" fill="#F05C7C"/>'
+            f'<path d="M {width*0.52:.2f} {size*0.86:.2f} L {width*0.46:.2f} {size*1.00:.2f} L {width*0.62:.2f} {size*0.90:.2f} Z" fill="#FFB347"/>'
+        )
+    if token == "🤖":
+        return wrap(
+            f'<rect x="{width*0.20:.2f}" y="{size*0.22:.2f}" width="{width*0.60:.2f}" height="{size*0.48:.2f}" rx="{size*0.12:.2f}" fill="#8EC5FF"/>'
+            f'<rect x="{width*0.30:.2f}" y="{size*0.12:.2f}" width="{width*0.40:.2f}" height="{size*0.14:.2f}" rx="{size*0.06:.2f}" fill="#5E8EE8"/>'
+            f'<path d="M {width*0.50:.2f} {size*0.04:.2f} L {width*0.50:.2f} {size*0.14:.2f}" stroke="#5E8EE8" stroke-width="{stroke:.2f}" stroke-linecap="round"/>'
+            f'<circle cx="{width*0.38:.2f}" cy="{size*0.45:.2f}" r="{size*0.05:.2f}" fill="#1D2C5B"/>'
+            f'<circle cx="{width*0.62:.2f}" cy="{size*0.45:.2f}" r="{size*0.05:.2f}" fill="#1D2C5B"/>'
+            f'<rect x="{width*0.37:.2f}" y="{size*0.56:.2f}" width="{width*0.26:.2f}" height="{size*0.06:.2f}" rx="{size*0.03:.2f}" fill="#1D2C5B"/>'
+        )
+    if token == "💥":
+        pts = [
+            (0.50, 0.02), (0.60, 0.26), (0.92, 0.12), (0.74, 0.40), (0.98, 0.52),
+            (0.72, 0.62), (0.88, 0.94), (0.56, 0.78), (0.40, 1.00), (0.32, 0.72),
+            (0.06, 0.86), (0.18, 0.58), (0.00, 0.44), (0.26, 0.34), (0.12, 0.10), (0.40, 0.22)
+        ]
+        poly = " ".join(f"{width*px:.2f},{size*py:.2f}" for px, py in pts)
+        return wrap(
+            f'<polygon points="{poly}" fill="#FF9B42"/>'
+            f'<polygon points="{" ".join(f"{width*(0.50 + (px-0.50)*0.58):.2f},{size*(0.52 + (py-0.52)*0.58):.2f}" for px, py in pts)}" fill="#FFD85A"/>'
+        )
+    if token == "📌":
+        return wrap(
+            f'<circle cx="{width*0.50:.2f}" cy="{size*0.24:.2f}" r="{size*0.16:.2f}" fill="#FF6A86"/>'
+            f'<path d="M {width*0.50:.2f} {size*0.38:.2f} L {width*0.68:.2f} {size*0.62:.2f} L {width*0.60:.2f} {size*0.68:.2f} L {width*0.44:.2f} {size*0.48:.2f} Z" fill="#D64A68"/>'
+            f'<path d="M {width*0.44:.2f} {size*0.48:.2f} L {width*0.28:.2f} {size*0.92:.2f}" stroke="#5A4A4A" stroke-width="{stroke:.2f}" stroke-linecap="round"/>'
+        )
+    if token == "📋":
+        return wrap(
+            f'<rect x="{width*0.24:.2f}" y="{size*0.16:.2f}" width="{width*0.52:.2f}" height="{size*0.68:.2f}" rx="{size*0.08:.2f}" fill="#F3F6FF"/>'
+            f'<rect x="{width*0.36:.2f}" y="{size*0.10:.2f}" width="{width*0.28:.2f}" height="{size*0.12:.2f}" rx="{size*0.05:.2f}" fill="#7C63D8"/>'
+            f'<path d="M {width*0.34:.2f} {size*0.36:.2f} L {width*0.64:.2f} {size*0.36:.2f} M {width*0.34:.2f} {size*0.52:.2f} L {width*0.64:.2f} {size*0.52:.2f} M {width*0.34:.2f} {size*0.68:.2f} L {width*0.58:.2f} {size*0.68:.2f}" stroke="#8C96AE" stroke-width="{stroke:.2f}" stroke-linecap="round"/>'
+        )
+    if token == "⚖":
+        return wrap(
+            f'<path d="M {width*0.50:.2f} {size*0.18:.2f} L {width*0.50:.2f} {size*0.70:.2f} M {width*0.30:.2f} {size*0.30:.2f} L {width*0.70:.2f} {size*0.30:.2f} M {width*0.50:.2f} {size*0.18:.2f} L {width*0.42:.2f} {size*0.10:.2f} M {width*0.50:.2f} {size*0.18:.2f} L {width*0.58:.2f} {size*0.10:.2f}" stroke="#6E5A2C" stroke-width="{stroke:.2f}" stroke-linecap="round"/>'
+            f'<path d="M {width*0.30:.2f} {size*0.30:.2f} L {width*0.22:.2f} {size*0.46:.2f} M {width*0.30:.2f} {size*0.30:.2f} L {width*0.38:.2f} {size*0.46:.2f}" stroke="#6E5A2C" stroke-width="{stroke:.2f}" stroke-linecap="round"/>'
+            f'<path d="M {width*0.70:.2f} {size*0.30:.2f} L {width*0.62:.2f} {size*0.46:.2f} M {width*0.70:.2f} {size*0.30:.2f} L {width*0.78:.2f} {size*0.46:.2f}" stroke="#6E5A2C" stroke-width="{stroke:.2f}" stroke-linecap="round"/>'
+            f'<path d="M {width*0.18:.2f} {size*0.48:.2f} Q {width*0.30:.2f} {size*0.62:.2f} {width*0.42:.2f} {size*0.48:.2f} Z" fill="#7AA2FF"/>'
+            f'<path d="M {width*0.58:.2f} {size*0.48:.2f} Q {width*0.70:.2f} {size*0.62:.2f} {width*0.82:.2f} {size*0.48:.2f} Z" fill="#F28CC8"/>'
+            f'<rect x="{width*0.38:.2f}" y="{size*0.72:.2f}" width="{width*0.24:.2f}" height="{size*0.07:.2f}" rx="{size*0.03:.2f}" fill="#6E5A2C"/>'
+        )
+    if token == "🔄":
+        return wrap(
+            f'<path d="M {width*0.22:.2f} {size*0.52:.2f} C {width*0.24:.2f} {size*0.26:.2f} {width*0.64:.2f} {size*0.20:.2f} {width*0.76:.2f} {size*0.38:.2f}" stroke="#4F7FF7" stroke-width="{stroke*1.8:.2f}" fill="none" stroke-linecap="round"/>'
+            f'<path d="M {width*0.68:.2f} {size*0.26:.2f} L {width*0.82:.2f} {size*0.30:.2f} L {width*0.74:.2f} {size*0.42:.2f}" fill="#4F7FF7"/>'
+            f'<path d="M {width*0.78:.2f} {size*0.50:.2f} C {width*0.76:.2f} {size*0.78:.2f} {width*0.36:.2f} {size*0.82:.2f} {width*0.24:.2f} {size*0.64:.2f}" stroke="#43C56B" stroke-width="{stroke*1.8:.2f}" fill="none" stroke-linecap="round"/>'
+            f'<path d="M {width*0.32:.2f} {size*0.76:.2f} L {width*0.18:.2f} {size*0.72:.2f} L {width*0.26:.2f} {size*0.60:.2f}" fill="#43C56B"/>'
+        )
+    if token == "🗺":
+        return wrap(
+            f'<path d="M {width*0.14:.2f} {size*0.20:.2f} L {width*0.36:.2f} {size*0.14:.2f} L {width*0.56:.2f} {size*0.22:.2f} L {width*0.78:.2f} {size*0.16:.2f} L {width*0.86:.2f} {size*0.78:.2f} L {width*0.64:.2f} {size*0.84:.2f} L {width*0.44:.2f} {size*0.76:.2f} L {width*0.22:.2f} {size*0.82:.2f} Z" fill="#D9F0D4"/>'
+            f'<path d="M {width*0.36:.2f} {size*0.14:.2f} L {width*0.44:.2f} {size*0.76:.2f} M {width*0.56:.2f} {size*0.22:.2f} L {width*0.64:.2f} {size*0.84:.2f}" stroke="#89B97A" stroke-width="{stroke:.2f}"/>'
+            f'<path d="M {width*0.56:.2f} {size*0.46:.2f} C {width*0.56:.2f} {size*0.34:.2f} {width*0.68:.2f} {size*0.30:.2f} {width*0.68:.2f} {size*0.44:.2f} C {width*0.68:.2f} {size*0.54:.2f} {width*0.56:.2f} {size*0.64:.2f} {width*0.56:.2f} {size*0.72:.2f} C {width*0.56:.2f} {size*0.64:.2f} {width*0.44:.2f} {size*0.54:.2f} {width*0.44:.2f} {size*0.44:.2f} C {width*0.44:.2f} {size*0.30:.2f} {width*0.56:.2f} {size*0.34:.2f} {width*0.56:.2f} {size*0.46:.2f} Z" fill="#FF6A86"/>'
+        )
+    if token == "🧩":
+        return wrap(
+            f'<path d="M {width*0.26:.2f} {size*0.24:.2f} H {width*0.46:.2f} C {width*0.44:.2f} {size*0.14:.2f} {width*0.50:.2f} {size*0.08:.2f} {width*0.60:.2f} {size*0.08:.2f} C {width*0.72:.2f} {size*0.08:.2f} {width*0.78:.2f} {size*0.16:.2f} {width*0.76:.2f} {size*0.26:.2f} H {width*0.84:.2f} V {size*0.46:.2f} C {width*0.94:.2f} {size*0.44:.2f} {size*0.94:.2f} {size*0.50:.2f} {size*0.94:.2f} {size*0.60:.2f} C {size*0.94:.2f} {size*0.72:.2f} {width*0.86:.2f} {size*0.78:.2f} {width*0.76:.2f} {size*0.76:.2f} V {size*0.84:.2f} H {width*0.26:.2f} V {size*0.64:.2f} C {width*0.16:.2f} {size*0.66:.2f} {width*0.10:.2f} {size*0.60:.2f} {width*0.10:.2f} {size*0.50:.2f} C {width*0.10:.2f} {size*0.40:.2f} {width*0.16:.2f} {size*0.34:.2f} {width*0.26:.2f} {size*0.36:.2f} Z" fill="#8B6CFF"/>'
+        )
+    if token == "✨":
+        return wrap(
+            f'<path d="M {width*0.50:.2f} {size*0.08:.2f} L {width*0.58:.2f} {size*0.42:.2f} L {width*0.92:.2f} {size*0.50:.2f} L {width*0.58:.2f} {size*0.58:.2f} L {width*0.50:.2f} {size*0.92:.2f} L {width*0.42:.2f} {size*0.58:.2f} L {width*0.08:.2f} {size*0.50:.2f} L {width*0.42:.2f} {size*0.42:.2f} Z" fill="#FFD95A"/>'
+        )
+    if token == "🤔":
+        return wrap(
+            f'<circle cx="{width*0.50:.2f}" cy="{size*0.40:.2f}" r="{size*0.28:.2f}" fill="#FFD76A"/>'
+            f'<circle cx="{width*0.40:.2f}" cy="{size*0.38:.2f}" r="{size*0.04:.2f}" fill="#5A4622"/>'
+            f'<circle cx="{width*0.58:.2f}" cy="{size*0.41:.2f}" r="{size*0.04:.2f}" fill="#5A4622"/>'
+            f'<path d="M {width*0.35:.2f} {size*0.30:.2f} L {width*0.47:.2f} {size*0.26:.2f}" stroke="#5A4622" stroke-width="{stroke:.2f}" stroke-linecap="round"/>'
+            f'<path d="M {width*0.44:.2f} {size*0.52:.2f} Q {width*0.52:.2f} {size*0.48:.2f} {width*0.60:.2f} {size*0.54:.2f}" stroke="#5A4622" stroke-width="{stroke:.2f}" fill="none" stroke-linecap="round"/>'
+            f'<path d="M {width*0.62:.2f} {size*0.62:.2f} Q {width*0.70:.2f} {size*0.56:.2f} {width*0.76:.2f} {size*0.70:.2f}" stroke="#F0C08A" stroke-width="{stroke*2.0:.2f}" fill="none" stroke-linecap="round"/>'
+        )
+    return ""
 
 
 def _slugify(text: str) -> str:
@@ -405,6 +542,7 @@ def _strip_control_directives(text: str) -> str:
         r"(?:^|\s)(?:语气|气质|tone)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
         r"(?:^|\s)(?:装饰密度|装饰程度|decor-level|decor_level)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
         r"(?:^|\s)(?:表情策略|emoji-policy|emoji_policy)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
+        r"(?:^|\s)(?:表情渲染|emoji-render-mode|emoji_render_mode)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
         r"(?:^|\s)(?:封面布局|cover-layout|cover_layout)\s*[:：]\s*[A-Za-z0-9_\u4e00-\u9fff\-]+",
         r"(?:^|\s)(?:主视觉表情|封面表情|hero-emoji|hero_emoji)\s*[:：]\s*[^\n]+",
     ]
@@ -436,6 +574,7 @@ def _resolve_render_controls(prompt: str) -> dict[str, str]:
     tone_raw = direct_value(["语气", "气质", "tone"])
     decor_raw = direct_value(["装饰密度", "装饰程度", "decor-level", "decor_level"])
     emoji_raw = direct_value(["表情策略", "emoji-policy", "emoji_policy"])
+    emoji_render_mode_raw = direct_value(["表情渲染", "emoji-render-mode", "emoji_render_mode"])
     cover_layout_raw = direct_value(["封面布局", "cover-layout", "cover_layout"])
     hero_emoji_raw = _extract_named_value(prompt, ["主视觉表情", "封面表情", "hero-emoji", "hero_emoji"]) or ""
 
@@ -522,6 +661,17 @@ def _resolve_render_controls(prompt: str) -> dict[str, str]:
             return "expressive"
         return "auto"
 
+    def normalize_emoji_render_mode(value: str) -> str:
+        if value in {"font", "字体", "文本"}:
+            return "font"
+        if value in {"svg", "矢量", "图形"}:
+            return "svg"
+        if value in {"mono", "单色", "黑白"}:
+            return "mono"
+        if value in {"none", "无", "关闭"}:
+            return "none"
+        return "auto"
+
     def normalize_cover_layout(value: str) -> str:
         if value in {"title_first", "标题优先", "传统"}:
             return "title_first"
@@ -538,6 +688,7 @@ def _resolve_render_controls(prompt: str) -> dict[str, str]:
     tone = normalize_tone(tone_raw)
     decor_level = normalize_decor(decor_raw)
     emoji_policy = normalize_emoji(emoji_raw)
+    emoji_render_mode = normalize_emoji_render_mode(emoji_render_mode_raw)
     cover_layout = normalize_cover_layout(cover_layout_raw)
     hero_emoji = hero_emoji_raw.strip()
 
@@ -570,6 +721,7 @@ def _resolve_render_controls(prompt: str) -> dict[str, str]:
         "tone": tone,
         "decor_level": decor_level,
         "emoji_policy": emoji_policy,
+        "emoji_render_mode": emoji_render_mode,
         "cover_layout": cover_layout,
         "hero_emoji": hero_emoji,
     }
@@ -674,9 +826,19 @@ def _svg_text_block(
     if not lines:
         return ""
     font = "PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, sans-serif"
+    emoji_render_mode = CURRENT_EMOJI_RENDER_MODE
     pieces = ["<g>"]
     for idx, line in enumerate(lines):
         line_y = y + idx * size * line_gap
+        emoji_only = re.fullmatch(r"[\u2600-\u27BF\U0001F300-\U0001FAFF\ufe0f\u200d]+", line.strip() or "")
+        if emoji_only:
+            if emoji_render_mode == "none":
+                continue
+            if emoji_render_mode == "svg":
+                svg_emoji = _emoji_svg_markup(line.strip(), x, line_y, int(size), anchor=anchor)
+                if svg_emoji:
+                    pieces.append(svg_emoji)
+                    continue
         leading_emoji = None
         rest = line
         if anchor == "start":
@@ -685,6 +847,21 @@ def _svg_text_block(
                 leading_emoji = m.group(1)
                 rest = m.group(2)
         if leading_emoji:
+            if emoji_render_mode == "none":
+                leading_emoji = None
+            elif emoji_render_mode == "svg":
+                emoji_size = int(size * 1.38)
+                emoji_y = line_y
+                emoji_x = x
+                rest_x = x + emoji_size * 1.05
+                svg_emoji = _emoji_svg_markup(leading_emoji, emoji_x, emoji_y, emoji_size, anchor="start")
+                if svg_emoji:
+                    pieces.append(svg_emoji)
+                    pieces.append(
+                        f'<text x="{rest_x:.2f}" y="{line_y:.2f}" text-anchor="start" font-family="{font}" '
+                        f'font-size="{size}" font-weight="{weight}" fill="{color}">{html.escape(rest)}</text>'
+                    )
+                    continue
             emoji_size = int(size * 1.38)
             emoji_y = line_y
             emoji_x = x
@@ -878,6 +1055,9 @@ def _title_emoji_svg(
 ) -> str:
     if not emoji or not title_lines:
         return ""
+    emoji_render_mode = CURRENT_EMOJI_RENDER_MODE
+    if emoji_render_mode == "none":
+        return ""
     last_line = title_lines[-1]
     line_width = _estimate_line_width(last_line, title_size)
     emoji_size = max(24, int(title_size * scale))
@@ -892,6 +1072,10 @@ def _title_emoji_svg(
         else:
             emoji_x = min(base_x + line_width + width * 0.035, width * 0.90)
     emoji_y = title_y + (len(title_lines) - 1) * title_size * 1.06 + (emoji_size * (0.86 if stack_emoji else 0.10))
+    if emoji_render_mode == "svg":
+        svg_emoji = _emoji_svg_markup(emoji, emoji_x, emoji_y, emoji_size, anchor="start")
+        if svg_emoji:
+            return svg_emoji
     return _svg_text_block(emoji_x, emoji_y, [emoji], emoji_size, color, weight=800, anchor="start")
 
 
@@ -1628,6 +1812,7 @@ def _validate_story_plan(plan: Any) -> dict[str, Any]:
         ("tone", SUPPORTED_TONES),
         ("decor_level", SUPPORTED_DECOR_LEVELS),
         ("emoji_policy", SUPPORTED_EMOJI_POLICIES),
+        ("emoji_render_mode", SUPPORTED_EMOJI_RENDER_MODES),
     ]:
         _validate_enum_field(errors, "story-plan", plan.get(field_name), allowed, field_name)
 
@@ -1680,6 +1865,7 @@ def _validate_story_plan(plan: Any) -> dict[str, Any]:
             ("tone", SUPPORTED_TONES),
             ("decor_level", SUPPORTED_DECOR_LEVELS),
             ("emoji_policy", SUPPORTED_EMOJI_POLICIES),
+            ("emoji_render_mode", SUPPORTED_EMOJI_RENDER_MODES),
         ]:
             _validate_enum_field(errors, where, card.get(field_name), allowed, field_name)
 
@@ -1784,6 +1970,7 @@ def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], 
     global_tone = plan.get("tone", "auto")
     global_decor_level = plan.get("decor_level", "auto")
     global_emoji_policy = plan.get("emoji_policy", "auto")
+    global_emoji_render_mode = plan.get("emoji_render_mode", "auto")
     global_cover_layout = plan.get("cover_layout", "auto")
     global_hero_emoji = plan.get("hero_emoji", "")
     cards: list[dict[str, Any]] = []
@@ -1802,6 +1989,7 @@ def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], 
             global_tone,
             global_decor_level,
             global_emoji_policy,
+            global_emoji_render_mode,
             global_cover_layout,
             global_hero_emoji,
         )
@@ -1819,6 +2007,7 @@ def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], 
                 "tone": global_tone,
                 "decor_level": global_decor_level,
                 "emoji_policy": global_emoji_policy,
+                "emoji_render_mode": global_emoji_render_mode,
                 "cover_layout": global_cover_layout,
                 "hero_emoji": global_hero_emoji,
             }
@@ -1844,6 +2033,7 @@ def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], 
             raw.get("tone", global_tone),
             raw.get("decor_level", global_decor_level),
             raw.get("emoji_policy", global_emoji_policy),
+            raw.get("emoji_render_mode", global_emoji_render_mode),
             raw.get("cover_layout", global_cover_layout),
             raw.get("hero_emoji", global_hero_emoji),
         )
@@ -1867,6 +2057,7 @@ def _build_story_cards_from_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], 
                 "tone": raw.get("tone", global_tone),
                 "decor_level": raw.get("decor_level", global_decor_level),
                 "emoji_policy": raw.get("emoji_policy", global_emoji_policy),
+                "emoji_render_mode": raw.get("emoji_render_mode", global_emoji_render_mode),
                 "cover_layout": raw.get("cover_layout", global_cover_layout),
                 "hero_emoji": raw.get("hero_emoji", global_hero_emoji),
                 "image_path": raw.get("image_path"),
@@ -2266,6 +2457,7 @@ def _compose_cover_svg(prompt: str, width: int, height: int) -> str:
 def _compose_text_cover_svg(prompt: str, width: int, height: int) -> str:
     copy = _derive_info_copy(prompt, mode="text_cover")
     controls = _resolve_render_controls(prompt)
+    _set_current_emoji_render_mode(controls.get("emoji_render_mode", "auto"))
     seed = _stable_int(prompt)
     clean_title, trailing_title_emoji = _split_trailing_emoji(copy["title"])
     focus_token = _extract_focus_token(clean_title)
@@ -2409,6 +2601,7 @@ def _compose_infographic_svg(prompt: str, width: int, height: int) -> str:
     image_paths = _extract_story_image_paths(prompt)
     copy = _derive_info_copy(prompt, mode="infographic")
     controls = _resolve_render_controls(prompt)
+    _set_current_emoji_render_mode(controls.get("emoji_render_mode", "auto"))
     kind = _infer_infographic_kind(_strip_image_directives(prompt))
     clean_title, trailing_title_emoji = _split_trailing_emoji(copy["title"])
     title_lines, title_size = _fit_text_block(
@@ -3307,6 +3500,7 @@ def _append_render_controls(
     tone: str = "auto",
     decor_level: str = "auto",
     emoji_policy: str = "auto",
+    emoji_render_mode: str = "auto",
     cover_layout: str = "auto",
     hero_emoji: str = "",
 ) -> str:
@@ -3329,6 +3523,8 @@ def _append_render_controls(
         parts.append(f"装饰密度：{decor_level}")
     if emoji_policy and emoji_policy != "auto":
         parts.append(f"表情策略：{emoji_policy}")
+    if emoji_render_mode and emoji_render_mode != "auto":
+        parts.append(f"表情渲染：{emoji_render_mode}")
     if cover_layout and cover_layout != "auto":
         parts.append(f"封面布局：{cover_layout}")
     if hero_emoji:
@@ -3592,6 +3788,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--tone", choices=["auto", "calm", "playful", "bold", "editorial"], default="auto", help="Overall tone hint for expressive vs restrained rendering")
     parser.add_argument("--decor-level", choices=["auto", "none", "low", "medium"], default="auto", help="How much decorative treatment to allow")
     parser.add_argument("--emoji-policy", choices=["auto", "none", "sparse", "expressive"], default="auto", help="How freely emoji-style accents may appear")
+    parser.add_argument("--emoji-render-mode", choices=["auto", "font", "svg", "mono", "none"], default="auto", help="How emoji-like accents should be rendered")
     parser.add_argument("--cover-layout", choices=["auto", "title_first", "hero_emoji_top"], default="auto", help="Cover composition strategy")
     parser.add_argument("--hero-emoji", default="", help="Explicit hero emoji for cover-style pages")
     parser.add_argument("--outline-only", action="store_true", help="Write analysis and outline only")
@@ -3627,6 +3824,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.tone,
                 args.decor_level,
                 args.emoji_policy,
+                args.emoji_render_mode,
                 args.cover_layout,
                 args.hero_emoji,
             )

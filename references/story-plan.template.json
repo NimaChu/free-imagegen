@@ -9,6 +9,7 @@
   "tone": "auto",
   "decor_level": "auto",
   "emoji_policy": "auto",
+  "emoji_render_mode": "auto",
   "cover_layout": "hero_emoji_top",
   "hero_emoji": "🤖",
   "cards": [
@@ -40,6 +41,7 @@
       "tone": "playful",
       "decor_level": "low",
       "emoji_policy": "sparse",
+      "emoji_render_mode": "svg",
       "bullets": [
         "要点一 / 用短句描述核心价值",
         "要点二 / 一条只说一件事",

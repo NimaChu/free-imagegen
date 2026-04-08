@@ -49,6 +49,12 @@ Use these only when they help the content.
   - `none`: text only
   - `sparse`: one or two emoji accents when helpful
   - `expressive`: more visible emoji treatment
+- `emoji_render_mode`
+  - `auto`: use the safest platform default
+  - `font`: render emoji as text glyphs
+  - `svg`: replace common emoji with built-in SVG graphics
+  - `mono`: allow monochrome text-style emoji fallback
+  - `none`: suppress emoji accents
 
 Use these controls to express intent, not to decorate everything by default.
 
@@ -63,6 +69,8 @@ Bad uses:
 - adding emoji to dense configuration notes
 - making every page playful in a serious technical article
 - using decoration to compensate for weak structure
+
+If the target environment is Linux or another headless server, prefer `emoji_render_mode: "svg"` when emoji matter visually.
 
 ## First Pass: Understand The Article
 
