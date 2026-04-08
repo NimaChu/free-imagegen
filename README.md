@@ -1,198 +1,132 @@
 # Free ImageGen
 
-一个 **免 API、没硬件门槛**、更适合中文内容工作流的本地生图技能。
+[中文 README](./README.zh-CN.md)
 
-不用 GPU，不用云端图片服务，不用图片 API，也能直接生成：
+A **no-API, no-GPU, fully local** image-generation skill for content-first workflows.
 
-- 📱 小红书封面
-- 📊 小红书信息图 / 知识卡
-- 📰 飞书 / 公众号文章图文卡组
-- 🦞 OpenClaw 原生支持
+If you want to create:
+- Xiaohongshu covers
+- knowledge cards and infographics
+- article-to-image carousels
+- OpenClaw-ready visual assets
 
-如果你想做的是“内容表达型图片”，而不是写实大模型绘画，这个技能会比很多扩散模型更顺手。
+this is often a better fit than diffusion models.
 
----
+## Why this exists
 
-## 它和扩散模型有什么不一样？
+Most image generators are optimized for:
+- photorealism
+- atmosphere
+- visual spectacle
+- “one prompt, one impressive-looking image”
 
-大多数文生图工具，强在：
+`Free ImageGen` is optimized for something else:
+- ✅ **No API required** — no image API bills
+- ✅ **No hardware barrier** — no GPU dependency, no local diffusion setup
+- ✅ **Fully local** — better for privacy, reproducibility, and cost control
+- ✅ **High freedom** — the agent can decide pagination, layout, tone, and style
+- ✅ **Chinese-friendly** — stable Chinese typography, mixed Chinese/English copy, phone-first readability
+- ✅ **Xiaohongshu-friendly** — designed for covers, card posts, explainers, and article image sets
 
-- 写实感
-- 氛围感
-- 视觉奇观
-- 一句话生成“看起来很厉害”的图
+If your goal is **content expression**, not photorealistic rendering, this workflow is usually more reliable than diffusion-style generation.
 
-`Free ImageGen` 走的是另一条路：
+## Compared with diffusion models
 
-- ✅ **免费**：不按张收费，不走在线图片 API
-- ✅ **纯本地**：更适合隐私、可控、低成本工作流
-- ✅ **没硬件门槛**：不要求高配 GPU，不靠本地大模型显卡推理
-- ✅ **中文友好**：中英混排、中文标题、手机阅读都更稳
-- ✅ **自由度高**：agent 可以先判断分页、版式、风格，再交给 skill 执行
-- ✅ **内容导向**：更适合封面、信息图、图文卡组，而不是随机生成一张“好看图”
+Diffusion models are great when you want:
+- realistic illustration
+- painterly or cinematic results
+- visual surprise
+- detail-heavy freeform artwork
 
-如果你要的是：
+`Free ImageGen` is better when you want:
+- structured visual communication
+- article pages with readable text
+- explainers, comparisons, checklists, maps, and QA cards
+- a full image set generated from one article
+- a renderer that follows the agent instead of replacing the agent’s judgment
 
-- 小红书封面
-- 小红书干货图
-- 飞书 / 公众号文章转图片
-- OpenClaw 的图文内容页
-- 一整套由 agent 规划好的视觉卡组
+In one sentence:
 
-那它通常会比扩散模型更稳、更便宜，也更适合中文内容生产。✨
+> This is a local design renderer for content workflows, not a diffusion model chasing visual spectacle.
 
----
+## Best use cases
 
-## 先说清楚：创意来自哪里？
+### 1. Xiaohongshu covers
+Use it for:
+- bold title covers
+- opinion-led covers
+- tool recommendation covers
+- hero-emoji covers
 
-这套技能不会凭空替你变出“好创意”。
+### 2. Infographics and knowledge cards
+Built-in card styles include:
+- checklist cards
+- comparison cards
+- mechanism cards
+- product maps
+- QA cards
+- flow cards
+- timeline cards
 
-更准确地说：
+### 3. Turn one article into a full image set
+This is one of the strongest workflows.
 
-- 🧠 **创意来自人类**
-- 🤖 **表达方案取决于 agent**
-- 🛠️ **最终落图质量，取决于 agent 对内容的理解、判断和设计能力**
-- 📦 **skill 负责把这些判断稳定渲染出来**
+Good fits:
+- Feishu articles
+- WeChat articles
+- long-form notes
+- interviews and summaries
+- product updates
+- AI tool explainers
 
-也就是说，它的价值不在“自己很聪明”，而在于：
+### 4. Free-form SVG creation
+When you do not want a built-in layout, the agent can directly produce SVG via `custom_svg`.
 
-- 不限制 agent 发挥
-- 不把版式搞乱
-- 不把中文弄坏
-- 不要求额外硬件和图片 API
+Good fits:
+- mascots
+- stickers
+- single-page decorative visuals
+- custom illustrations where the agent wants full control
 
-如果 agent 很强，这套技能会很强。
-如果 agent 判断一般，这套技能也不会替它“脑补成神图”。
+## Where the creativity comes from
 
-这反而是它很适合 OpenClaw 的原因：
+This skill does **not** invent strong ideas for you.
 
-- 判断交给 agent
-- 稳定执行交给 renderer
+More accurately:
+- 🧠 The creative direction comes from the human
+- 🤖 The visual strategy depends on the agent
+- 🛠️ The renderer makes those decisions stable and exportable
 
----
+That is the point of the workflow:
+- the agent decides
+- the renderer executes
 
-## 推荐使用场景
-
-### 📱 1. 小红书封面
-
-适合做：
-
-- 大标题封面
-- 热点观点封面
-- 工具推荐封面
-- 带大表情主视觉的封面
-
-特点：
-
-- 手机端可读性优先
-- 标题层级清楚
-- 中文更稳
-- 支持更像小红书的内容表达，而不是“海报味太重”
-
-### 📊 2. 小红书信息图 / 知识卡
-
-适合做：
-
-- 机制卡
-- 对比卡
-- 清单卡
-- 工作流卡
-- 产品地图
-- 工具盘点
-- QA 卡
-
-这类图的核心不是“画得多花”，而是：
-
-- 一眼看懂
-- 手机上读得舒服
-- 适合收藏、转发、继续讲述
-
-### 📰 3. 一篇文章拆成一整套图片
-
-这是它最强的场景之一。
-
-适合：
-
-- 飞书文章
-- 公众号文章
-- 长笔记
-- 采访整理
-- AI 工具解读
-- 产品更新说明
-
-你可以让 agent：
-
-- 先读完整篇文章
-- 决定怎么分页
-- 决定哪页保留原文结构
-- 决定哪页转成清单 / 机制卡 / 对比卡
-- 决定整套图的统一风格
-
-最后输出一整套图，而不是一张孤零零的图。🚀
-
-### 🎨 4. 自由创作图案 / SVG 页面
-
-如果你不想被内置版式限制，也可以让 agent 直接自由发挥。
-
-适合：
-
-- 小动物
-- 吉祥物
-- 贴纸风图案
-- 单页装饰插图
-- 特定主题 SVG 设计
-
-这条路的好处是：
-
-- skill 不替 agent 乱做设计决定
-- agent 可以自己写出想要的画面
-- renderer 负责稳定导出
-
----
-
-## 为什么它适合 OpenClaw / Agent 工作流？
-
-因为它的分工很清楚：
-
-- 👤 用户：给内容、给目标、给风格方向
-- 🤖 agent：负责理解文章、判断分页、决定版式和表达方式
-- 🛠️ skill：负责稳定渲染、本地导出、不乱、不重叠、不乱码
-
-很多图片工具的问题是：
-
-- 要么自由度太低，只会套模板
-- 要么自由度太高，但不稳定
-
-`Free ImageGen` 想做的是中间那条路：
-
-- 让 agent 负责思考
-- 让 renderer 负责执行
-
----
+If the agent is strong, the output can be very strong.
+If the agent is weak, this skill will not magically turn weak planning into a great image set.
 
 ## Quick Start
 
-### ⚡ 1. 快速做一张封面图
+### Create one cover
 
 ```bash
 python3 scripts/free_image_gen.py \
-  --prompt "文字封面，标题 AI 产品设计原则，副标题 清晰层级 高识别度，主题：light，封面布局：hero_emoji_top，主视觉表情：💡" \
+  --prompt "text cover, title AI Product Design Principles, subtitle Clear hierarchy and strong mobile readability, theme: light, cover layout: hero_emoji_top, hero emoji: 💡" \
   --output /absolute/path/output/cover.png \
   --width 1080 \
   --height 1440
 ```
 
-### 🧠 2. 快速做一张信息图
+### Create one infographic
 
 ```bash
 python3 scripts/free_image_gen.py \
-  --prompt "信息图 机制卡 角标：三个关键点 标题：AI Agent 为什么突然火了 副标题：不是模型更强了，而是入口和体验变了 1. 门槛更低 2. 分发更广 3. 商业化更真实" \
+  --prompt "infographic mechanism card kicker: three key points title: Why AI Agents suddenly exploded subtitle: It is not just the model — the entry point, UX, and distribution all changed 1. Lower barrier 2. Wider distribution 3. Real monetization" \
   --output /absolute/path/output/infographic.png \
   --width 1080 \
   --height 1440
 ```
 
-### 🧾 3. 给一篇文章，直接生成一整套图片
+### Give it one article and generate a full image set
 
 ```bash
 python3 scripts/free_image_gen.py \
@@ -203,90 +137,66 @@ python3 scripts/free_image_gen.py \
   --height 1440
 ```
 
-适合先快速打草稿，看看自动拆页效果。
+This is good for a quick first draft.
 
-### 🪄 4. 最推荐：让 agent 自由会话后生成整套图片
+### Recommended workflow: let the agent plan first
 
-这是最能发挥这套技能能力的方式。
+This is the workflow that best uses the skill.
 
-你可以直接对 agent 说：
+Ask the agent to:
+- read the full article
+- decide pagination
+- decide which pages should stay article-like
+- decide which pages should become checklist, mechanism, comparison, map, or QA cards
+- keep the tone faithful to the source
+- output `story-plan.json`
+- then call `free-imagegen` to render the set
 
-```text
-读完这篇文章，然后自己判断怎么分页、每页该用什么版式和风格。
-我希望最终输出一套适合小红书发布的图片：
-- 要有封面
-- 内容忠于原文，不要写“文章里提到”这种元话语
-- 该保留文章结构的页就保留
-- 该转成机制卡、清单卡、对比卡的页就转
-- 整体风格统一，手机阅读优先
+That gives you a workflow where:
+- the agent thinks
+- the renderer executes
 
-先产出 story-plan.json，再调用 free-imagegen 渲染整套图片。
-```
+## Output behavior
 
-这条路的好处是：
+Default behavior is intentionally clean:
+- PNG only by default
+- no extra SVG files unless you explicitly pass `--keep-svg`
+- cleaner default naming
+- cleaner default output folders
 
-- ✨ 更像 agent 在设计，而不是脚本在乱猜
-- ✨ 更适合长文和复杂内容
-- ✨ 更容易做出真正能发的小红书图文卡组
+## Freedom level
 
----
+This skill is **not** “template only.”
 
-## 它特别适合什么类型的内容？
+You can:
+- use built-in layouts for speed
+- let the agent plan a full image series
+- let the agent directly write `custom_svg`
 
-最适合：
+So the freedom comes from this balance:
+- structured when you need stability
+- open when you need control
 
-- 中文标题很重的封面
-- 知识型内容
-- 工具盘点
-- 工作流拆解
-- AI 产品观察
-- 文章转图文卡组
-- OpenClaw / Agent 相关内容表达
+## Fallback vs main path
 
-不太适合：
+`illustration` still exists, but it is now best understood as a **lightweight fallback**.
 
-- 写实摄影感图片
-- 扩散模型那种细节丰富的自由绘画
-- 局部重绘、抠图、修图
+Use `illustration` for:
+- quick abstract visuals
+- simple decorative single images
+- lightweight placeholder-style artwork
 
-一句话说：
+Use `custom_svg` first for:
+- recognizable objects
+- mascots
+- animals
+- robots
+- stickers
+- any page where the agent wants direct visual control
 
-> 它更像一个面向中文内容表达的本地设计引擎，而不是一个追求视觉幻觉的扩散模型。
+## Resources for agents
 
----
-
-## 关于自由度
-
-这套技能不是“只能套模板”。
-
-你可以：
-
-- 用内置版式快速做封面和信息图
-- 让 agent 先规划整套图的分页和风格
-- 直接让 agent 写 `custom_svg` 做自由创作
-
-所以它的自由度来源不是“乱生成”，而是：
-
-- 有结构时能稳
-- 需要自由时也能放开
-
----
-
-## 输出行为
-
-默认行为已经尽量收干净了：
-
-- 默认只输出 `PNG`
-- 默认不额外保存 `.svg`
-- 默认命名更整洁
-- 想保留 SVG 源文件时，再显式加：`--keep-svg`
-
----
-
-## 给 Agent 的接入资料
-
-如果你想稳定接进 OpenClaw / Codex agent，优先看这些：
-
+If you want to integrate this into OpenClaw or another agent workflow, start here:
 - `references/story-plan.schema.json`
 - `references/story-plan.template.json`
 - `references/story-plan.guide.md`
@@ -294,24 +204,18 @@ python3 scripts/free_image_gen.py \
 - `references/custom-svg-best-practices.md`
 - `references/custom-svg.story-plan.sample.json`
 
-这几份文件的目标不是限制 agent，恰恰相反：
+These files are meant to **protect freedom without sacrificing structure**.
 
-- 帮 agent 保持自由判断
-- 同时让输出结构足够稳
+## Summary
 
----
+If you want a workflow that is:
+- free
+- local
+- API-free
+- low-barrier
+- Chinese-friendly
+- Xiaohongshu-friendly
+- agent-driven
+- article-to-image capable
 
-## 一句话总结
-
-如果你想要的是：
-
-- 免费
-- 纯本地
-- 免 API
-- 没硬件门槛
-- 中文友好
-- 小红书友好
-- agent 可控
-- 能把文章变成一整套图
-
-那这套技能就是为这个场景做的。🦞
+then `Free ImageGen` is built for exactly that.
