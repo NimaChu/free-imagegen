@@ -1,41 +1,32 @@
 ---
 name: free-imagegen
-description: Fully local free text-to-image skill for OpenClaw and general assets. Generates SVG from prompt, then converts SVG to PNG with local tools only (no online API calls).
+description: "Use when the user asks to generate an image, create a picture, draw an illustration, or produce a text cover locally without external APIs. Fully local text-to-image skill for OpenClaw and general assets — generates SVG from prompt, then converts to PNG with local tools only."
 ---
 
 # Free ImageGen
 
 Use this skill when the user wants **fully local image generation** with a `Prompt -> SVG -> PNG` pipeline and does **not** want online image APIs.
 
-This skill is best for:
+## Mode Selection
 
-- text-heavy cover images
-- Xiaohongshu-style text covers
-- infographics and knowledge cards
-- article-to-image card sets
-- OpenClaw thumbnails and icons
-- simple stylized illustrations as a lightweight fallback
-- direct `custom_svg` rendering when the agent wants full visual control
+| User intent | Mode | Notes |
+|---|---|---|
+| Headline, title card, `文字封面`, `标题页` | `text_cover` | Xiaohongshu-style big-title covers, mobile-first |
+| Infographic, `知识卡片`, `图解`, `流程图`, `对比图` | `infographic` | Layouts: mechanism, comparison, flow, qa, timeline, catalog, map |
+| Long article → planned card set | `story plan` | Preferred: agent reads article first, writes `story-plan.json` |
+| Long article → auto card set | `article story` | Fallback when agent cannot plan structure |
+| Cover, thumbnail, poster, banner, `封面`, `海报` | `cover` | Explicit cover/poster requests only |
+| Person, mascot, object, scene, diagram | `custom_svg` | Agent authors SVG directly for full visual control |
+| Quick stylized sketch | `illustration` | Fallback only — not for recognizable subjects |
 
-This skill is **not** a photorealistic diffusion model. It is a local, rule-based composition engine that renders through SVG and exports PNG locally.
+Do **not** use for photorealistic generation, inpainting/outpainting, model-based editing, or online hosted APIs.
 
-## When To Use It
+## Workflow
 
-Use `free-imagegen` when the request matches one or more of these cases:
-
-- the user wants free local text-to-image generation
-- the user wants local PNG output, with optional SVG retention when needed
-- the user wants a text cover, title card, poster, or thumbnail
-- the user wants an infographic, comparison card, flow card, QA card, map, or catalog
-- the user wants to turn an article into a sequence of image cards
-- the user wants OpenClaw-ready `thumbnail` / `icon` assets
-
-Do **not** use this skill when the user needs:
-
-- photorealistic generation
-- inpainting / outpainting
-- model-based image editing
-- online hosted image APIs
+1. Choose mode from the table above
+2. Build the prompt (see Input Guidance below)
+3. Run the appropriate command
+4. **Verify output**: confirm the PNG exists and is non-empty (`test -s output.png`); if rendering fails, install a local SVG renderer — see `references/providers.md`
 
 ## Core Modes
 
@@ -165,21 +156,7 @@ Recommended references:
 - `references/custom-svg-best-practices.md`
 - `references/custom-svg.story-plan.sample.json`
 
-## Decision Rules
-
-Use these defaults unless the user clearly asks otherwise.
-
-1. If the user gives a long article or says “turn this article into images”, prefer `--story-plan-file` when an agent can first read and plan the structure.
-2. If the request is mostly text hierarchy and mobile readability, prefer `text_cover`.
-3. If the request is explanation, comparison, workflow, grouped products, or knowledge transfer, prefer `infographic`.
-4. If the request is a person, object, mascot, or scene that should be visually recognizable, prefer `custom_svg`.
-5. Use `illustration` only as a fallback for quick stylized subject sketches.
-6. If the user wants OpenClaw assets, use `--openclaw-project`.
-7. Keep output mobile-readable whenever text density is high: fewer lines, larger text, simpler structure.
-8. For long paragraphs that should stay close to the original writing, prefer `article_page` instead of forcing every section into an infographic layout.
-9. Treat auto story generation as a draft/fallback. When quality matters, let the agent decide pagination and layout explicitly.
-
-## Recommended Commands
+## Commands
 
 ### Single image
 
@@ -211,16 +188,6 @@ python3 scripts/free_image_gen.py \
   --height 1440
 ```
 
-### Keep SVG only when needed
-
-Default behavior now writes PNG only to avoid clutter.
-
-If you want source SVG files for debugging or manual editing, add:
-
-```bash
---keep-svg
-```
-
 ### Article to image card set
 
 ```bash
@@ -242,24 +209,6 @@ python3 scripts/free_image_gen.py \
   --height 1440
 ```
 
-### Analysis / prompts only
-
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt-file /absolute/path/article.txt \
-  --story-output-dir /absolute/path/output/article-story \
-  --prompts-only
-```
-
-### Images only
-
-```bash
-python3 scripts/free_image_gen.py \
-  --prompt-file /absolute/path/article.txt \
-  --story-output-dir /absolute/path/output/article-story \
-  --images-only
-```
-
 ### OpenClaw assets
 
 ```bash
@@ -268,190 +217,42 @@ python3 scripts/free_image_gen.py \
   --openclaw-project /absolute/path/to/your-openclaw-app
 ```
 
-## Story Strategies
+### Optional flags
 
-Use `--story-strategy` when article intent is clear.
+- `--keep-svg` — retain source SVG files (default: PNG only)
+- `--prompts-only` / `--images-only` — run only part of the pipeline
+- `--story-strategy auto|story|dense|visual` — article layout strategy
 
-- `auto`: default; let the tool infer the best structure
-- `story`: narrative / experience / personal workflow
-- `dense`: knowledge-heavy, structured, or terminology-heavy writing
-- `visual`: lighter, more cover-like, less dense per card
+## Agent-Planned Story Workflow
 
-## Agent-First Workflow
+For rich article-to-card conversion, prefer agent-planned rendering:
 
-When OpenClaw or another agent is available, prefer this sequence:
+1. Read the full article
+2. Decide pagination, layout per page, and visual treatment
+3. Write a `story-plan.json` — see `references/story-plan.schema.json` (contract), `references/story-plan.template.json` (skeleton), and `references/story-plan.guide.md` (judgment guide)
+4. Render with `--story-plan-file`
+5. **Verify**: invalid plans produce a validation error pointing to the schema
 
-1. read the full article
-2. decide pagination and layout page by page
-3. write a `story-plan.json`
-4. render with `--story-plan-file`
-
-This keeps the high-judgment work in the agent and the rendering work in the skill.
-
-Good uses for a plan file:
-
-- a page should preserve original article paragraphs
-- one section should become cards instead of prose
-- the opening page should be an article page but the next page should be a mechanism card
-- one page should use dark theme while another stays light
-- the agent wants tighter or looser page density per page
-- one page should feel more playful, with a little emoji/decor treatment, while another stays restrained
-
-Per-page controls now supported in `story-plan.json`:
-
-- `theme`
-- `density`
-- `surface_style` / `style`
-- `accent`
-- `series_style`
-- `section_role`
-- `tone`
-- `decor_level`
-- `emoji_policy`
-- `emoji_render_mode`
+Per-page plan controls (`theme`, `density`, `surface_style`, `accent`, `series_style`, `section_role`, `tone`, `decor_level`, `emoji_policy`, `emoji_render_mode`) and supported page types (`article_page`, `text_cover`, `mechanism`, `checklist`, `qa`, `catalog`, `map`, `comparison`, `flow`, `timeline`) are documented in `references/story-plan.guide.md`.
 
 Use `emoji_render_mode: "svg"` when the target environment is Linux/headless and emoji need to stay colorful and stable.
 
-Recommended page types in a plan:
-
-- `article_page`
-- `text_cover`
-- `mechanism`
-- `checklist`
-- `qa`
-- `catalog`
-- `map`
-- `comparison`
-- `flow`
-- `timeline`
-
-Recommended agent fields per page:
-
-- `title`
-- `subtitle`
-- `kicker`
-- `bullets`
-- `emphasis`
-- `image`
-- `theme`
-- `density`
-- `series_style`
-- `section_role`
-- `surface_style`
-- `accent`
+For `custom_svg` pages, see `references/custom-svg-best-practices.md`.
 
 ## Input Guidance
 
-### For story-plan workflows
-
-Prefer letting the agent decide:
-
-- where to split pages
-- which sections stay as prose
-- which sections become cards
-- where to place images
-- which visual treatment fits each page
-
-Use the renderer as an execution engine, not as the only decision-maker.
-
-If the agent emits an invalid `story-plan.json`, the CLI now stops early with a validation error and points back to the bundled template and schema.
-
-### For article workflows
-
-Prefer cleaned text input:
-
-- keep headings
-- keep bullet lists
-- keep tables as text
-- remove original embedded image placeholders
-- keep important numbers, contrasts, and section labels
-
-If an article has mixed content types, do not force one layout for the whole piece. Let the agent choose per page.
+- **Text covers**: include real copy directly — title, subtitle, highlighted number
+- **Infographics**: include structured content — title, subtitle, bullets, grouped items, step order, before/after language
+- **Illustrations**: describe subject, color, mood, lighting, density of detail
+- **Articles**: keep headings, bullet lists, tables, and key numbers; remove embedded image placeholders. For mixed content types, let the agent choose layout per page
 
 ## Render Controls
 
-The skill now exposes lightweight controls so the agent can steer look and density without editing code.
-
-Global CLI controls:
-
-- `--theme auto|light|dark`
-- `--page-density auto|comfy|compact`
-- `--surface-style auto|soft|card|minimal|editorial`
-- `--accent auto|blue|green|warm|rose`
-
-Per-page plan controls:
-
-- `theme`
-- `density`
-- `series_style`
-- `section_role`
-- `surface_style` or `style`
-- `accent`
-
-Additional story-plan controls:
-
-- `series_style: loose | unified`
-- `section_role: cover | chapter | body | summary`
-
-Use them like this:
-
-- `series_style=loose`: let pages feel more independent
-- `series_style=unified`: keep title spacing, section openers, and rhythm more aligned across `article_page`, `checklist`, `mechanism`, `catalog`, `qa`, `comparison`, `map`, `flow`, and `timeline`
-- `section_role=chapter`: stronger section opener treatment
-- `section_role=body`: normal reading page
-- `section_role=summary`: stronger closing / takeaway rhythm
-
-Important: these controls are still agent-authored decisions. The renderer should not invent them on its own.
-
-Use them when the agent wants:
-
-- dark pages for stronger contrast
-- compact pages for dense lists
-- comfy pages for article-like reading
-- different accent colors for different sections
-- different surface treatments across a card set
-
-### For infographic prompts
-
-Include as much structure as possible inside the prompt:
-
-- title
-- subtitle
-- highlighted number
-- bullets
-- grouped items
-- before/after language
-- step order
-
-### For text covers
-
-Include the real copy directly in the prompt.
-
-Good example:
-
-- `文字封面，标题 Vibe Coding 产品地图，副标题 主流编码代理、AI IDE 与云端开发工具全景` 
-
-### For illustrations
-
-Describe:
-
-- subject
-- color
-- mood
-- lighting
-- density of detail
+Global CLI flags: `--theme auto|light|dark`, `--page-density auto|comfy|compact`, `--surface-style auto|soft|card|minimal|editorial`, `--accent auto|blue|green|warm|rose`. Per-page plan controls and story-plan styling are documented in `references/story-plan.guide.md`.
 
 ## Output Expectations
 
-When the task is text-heavy, optimize for:
-
-- phone readability first
-- fewer line breaks
-- larger text when space allows
-- simple hierarchy over decorative complexity
-- stable layouts over overly clever compositions
-
-When the task is article conversion, prefer a small set of clear cards over one overloaded image.
+Optimized for phone readability: fewer line breaks, larger text, simple hierarchy. For article conversion, prefer a small set of clear cards over one overloaded image.
 
 ## HTTP Wrapper
 
@@ -461,24 +262,15 @@ Start local service:
 python3 scripts/free_image_http_service.py --host 127.0.0.1 --port 8787
 ```
 
-Endpoints:
-
-- `/health`
-- `/generate`
-- `/openclaw-assets`
+Endpoints: `/health`, `/generate`, `/openclaw-assets`
 
 ## Files
 
-- `scripts/free_image_gen.py`: core SVG generation and PNG export
-- `scripts/free_image_http_service.py`: local HTTP wrapper
-- `references/providers.md`: renderer notes
-
-## Practical Limits
-
-Keep these in mind while using the skill:
-
-- best results come from structured prompts
-- article summarization is heuristic, not model-level semantic understanding
-- illustration mode is stylized, not photorealistic
-- final PNG fidelity depends on the local SVG renderer available on the machine
-- some dense inputs may still need prompt cleanup for the cleanest mobile result
+- `scripts/free_image_gen.py` — core SVG generation and PNG export
+- `scripts/free_image_http_service.py` — local HTTP wrapper
+- `references/providers.md` — local renderer notes and priority
+- `references/story-plan.schema.json` — story plan data contract
+- `references/story-plan.template.json` — minimum working skeleton
+- `references/story-plan.guide.md` — pagination and layout judgment guide
+- `references/custom-svg-best-practices.md` — SVG authoring guidelines
+- `references/custom-svg.story-plan.sample.json` — sample custom SVG story plan
